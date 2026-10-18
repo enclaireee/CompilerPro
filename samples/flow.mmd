@@ -1,0 +1,6 @@
+%% Edit and watch the preview update.
+flowchart LR
+  A[Write] --> B{Compile?}
+  B -- yes --> C[Preview PDF]
+  B -- no --> A
+  C --> D[Export]

@@ -1,0 +1,51 @@
+/* LaTeX mode: PDF viewer, snippet preview, problems drawer. All scoped under .tex-preview / .tex-drawer. */
+.tex-preview { position: absolute; inset: 0; background: var(--desk); }
+.tex-preview [hidden] { display: none !important; }
+.tex-preview .pdf-host, .tex-preview .tex-snippet { position: absolute; inset: 0; }
+.tex-preview .empty { background: var(--bg); }
+
+.tex-preview .pdf-scroll { position: absolute; inset: 0; overflow: auto; background: var(--desk); }
+.tex-preview .pdf-scroll:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tex-preview .pdf-pages {
+  display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px;
+  width: max-content; min-width: 100%;
+}
+/* PDF paper is white by nature; the inverted variant gets a black placeholder to avoid a flash */
+.tex-preview .pdf-page { position: relative; flex: none; background: #fff; box-shadow: var(--shadow); }
+.tex-preview.invert .pdf-page { background: #000; }
+.tex-preview .pdf-page canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.tex-preview.invert .pdf-page canvas { filter: invert(1) hue-rotate(180deg); }
+.tex-preview .pdf-hl {
+  position: absolute; background: var(--accent); opacity: 0.35; border-radius: 2px;
+  pointer-events: none; transition: opacity 0.5s;
+}
+.tex-preview .pdf-hl.fade { opacity: 0; }
+.tex-preview .pdf-zoom {
+  position: absolute; right: 14px; bottom: 12px; padding: 2px 8px; border-radius: 10px;
+  background: var(--surface); color: var(--muted); font-size: 11.5px; box-shadow: var(--shadow);
+  opacity: 0; transition: opacity 0.2s; pointer-events: none;
+}
+.tex-preview .pdf-zoom.on { opacity: 1; }
+
+.tex-preview .tex-snippet { overflow: auto; padding: 16px; }
+.tex-preview .tex-hint { margin: 0 0 12px; text-align: center; font-size: 11.5px; color: var(--muted); }
+.tex-preview .tex-paper {
+  max-width: 720px; min-height: 60%; margin: 0 auto; padding: 24px 40px; min-width: 0;
+  background: var(--bg); color: var(--text); box-shadow: var(--shadow); border-radius: 2px;
+}
+.tex-preview .tex-block { padding: 10px 0; overflow-x: auto; }
+
+.tex-drawer { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.tex-drawer .tabs .btn { margin-left: auto; height: 22px; }
+.tex-drawer .tex-body { flex: 1; min-height: 0; overflow: auto; }
+.tex-drawer .tex-log {
+  margin: 0; padding: 8px 12px; font: 12px/1.45 var(--mono); white-space: pre; color: var(--text);
+  user-select: text; -webkit-user-select: text;
+}
+.tex-drawer .tex-diag { align-items: baseline; }
+.tex-drawer .tex-diag .sev { flex: none; font-size: 11px; text-transform: uppercase; }
+.tex-drawer .tex-diag.err .sev { color: var(--error); }
+.tex-drawer .tex-diag.warn .sev, .tex-drawer .tex-diag.warn .msg { color: var(--warning); }
+.tex-drawer .tex-diag .loc { flex: none; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.tex-drawer .tex-diag .msg { min-width: 0; overflow-wrap: anywhere; }
+.tex-drawer .empty { height: auto; padding: 24px; }

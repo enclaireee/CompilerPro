@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Source for both the launcher mark and the app icon (pnpm tauri icon). macOS grid: 824px tile, 100px margin. -->
+  <defs>
+    <linearGradient id="cp-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c2c2e"/>
+      <stop offset="1" stop-color="#0a0a0b"/>
+    </linearGradient>
+    <filter id="cp-sh" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#cp-bg)" filter="url(#cp-sh)"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#fff" stroke-opacity="0.09" stroke-width="3"/>
+  <g fill="none" stroke="#fff" stroke-width="32" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M440 330C395 330 380 345 380 390L380 470C380 500 365 512 335 512C365 512 380 524 380 554L380 634C380 679 395 694 440 694"/>
+    <path d="M584 330C629 330 644 345 644 390L644 470C644 500 659 512 689 512C659 512 644 524 644 554L644 634C644 679 629 694 584 694"/>
+  </g>
+</svg>
