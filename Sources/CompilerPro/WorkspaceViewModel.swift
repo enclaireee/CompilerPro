@@ -32,6 +32,11 @@ public final class WorkspaceViewModel: ObservableObject {
     public let folder: String
     public unowned let appState: AppState
 
+    // Window feedback
+    @Published public var statusMessage: String?
+    @Published public var alert: AppAlert?
+    private var statusTask: Task<Void, Never>?
+
     // Sidebar & Tree
     @Published public var treeEntries: [FileEntry] = []
     @Published public var flatFiles: [String] = []
@@ -213,11 +218,32 @@ public final class WorkspaceViewModel: ObservableObject {
 
     public func teardown() {
         outlineTask?.cancel()
+        statusTask?.cancel()
         latestRunID = -1
         texRunner.cancelCompile()
         if let focusObserver {
             NotificationCenter.default.removeObserver(focusObserver)
             self.focusObserver = nil
+        }
+    }
+
+    /// Errors raise an alert in this window; everything else goes to the status bar and VoiceOver.
+    public func showToast(_ text: String, isError: Bool = false) {
+        if isError {
+            alert = AppAlert(title: "Something went wrong", message: text)
+            return
+        }
+        statusTask?.cancel()
+        statusMessage = text
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [.announcement: text, .priority: NSAccessibilityPriorityLevel.high.rawValue]
+        )
+        statusTask = Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            statusMessage = nil
         }
     }
 
@@ -320,7 +346,7 @@ public final class WorkspaceViewModel: ObservableObject {
                 mermaidPan = .zero
             }
         } catch {
-            appState.showToast("Couldn't open \((path as NSString).lastPathComponent): \(error.localizedDescription)", isError: true)
+            showToast("Couldn't open \((path as NSString).lastPathComponent): \(error.localizedDescription)", isError: true)
         }
     }
 
@@ -392,7 +418,7 @@ public final class WorkspaceViewModel: ObservableObject {
             savedText = editorText
             return true
         } catch {
-            appState.showToast("Couldn't save \((path as NSString).lastPathComponent): \(error.localizedDescription)", isError: true)
+            showToast("Couldn't save \((path as NSString).lastPathComponent): \(error.localizedDescription)", isError: true)
             return false
         }
     }
@@ -460,14 +486,14 @@ public final class WorkspaceViewModel: ObservableObject {
         var name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return nil }
         guard !name.contains("/"), !name.contains(":"), name != ".", name != ".." else {
-            appState.showToast("File names can't contain “/” or “:”.", isError: true)
+            showToast("File names can't contain “/” or “:”.", isError: true)
             return nil
         }
         let ext = (name as NSString).pathExtension.lowercased()
         if ext.isEmpty {
             name += "." + (mode.extensions.first ?? "txt")
         } else if !mode.extensions.contains(ext) {
-            appState.showToast("A \(mode.displayName) project can only contain \(mode.extensions.map { ".\($0)" }.joined(separator: ", ")) files.", isError: true)
+            showToast("A \(mode.displayName) project can only contain \(mode.extensions.map { ".\($0)" }.joined(separator: ", ")) files.", isError: true)
             return nil
         }
         return name
@@ -476,7 +502,7 @@ public final class WorkspaceViewModel: ObservableObject {
     private func performCreate(name: String, in directory: String) {
         let url = URL(fileURLWithPath: directory).appendingPathComponent(name)
         guard !FileManager.default.fileExists(atPath: url.path) else {
-            appState.showToast("“\(name)” already exists.", isError: true)
+            showToast("“\(name)” already exists.", isError: true)
             return
         }
         // The first file in an empty project gets the starter template.
@@ -487,7 +513,7 @@ public final class WorkspaceViewModel: ObservableObject {
             refreshTree()
             openFile(url.path, revealLine: isFirst ? starter.initialLine : nil)
         } catch {
-            appState.showToast("Couldn't create “\(name)”: \(error.localizedDescription)", isError: true)
+            showToast("Couldn't create “\(name)”: \(error.localizedDescription)", isError: true)
         }
     }
 
@@ -501,7 +527,7 @@ public final class WorkspaceViewModel: ObservableObject {
             && (try? fm.attributesOfItem(atPath: src.path)[.systemFileNumber] as? Int)
                 == (try? fm.attributesOfItem(atPath: dest.path)[.systemFileNumber] as? Int)
         guard caseOnly || !fm.fileExists(atPath: dest.path) else {
-            appState.showToast("“\(name)” already exists.", isError: true)
+            showToast("“\(name)” already exists.", isError: true)
             return
         }
         do {
@@ -516,7 +542,7 @@ public final class WorkspaceViewModel: ObservableObject {
                 try fm.moveItem(at: src, to: dest)
             }
         } catch {
-            appState.showToast("Couldn't rename: \(error.localizedDescription)", isError: true)
+            showToast("Couldn't rename: \(error.localizedDescription)", isError: true)
             return
         }
         if samePath(path, currentFile) {
@@ -548,7 +574,7 @@ public final class WorkspaceViewModel: ObservableObject {
             refreshTree()
             openFile(dest.path)
         } catch {
-            appState.showToast("Couldn't duplicate: \(error.localizedDescription)", isError: true)
+            showToast("Couldn't duplicate: \(error.localizedDescription)", isError: true)
         }
     }
 
@@ -558,7 +584,7 @@ public final class WorkspaceViewModel: ObservableObject {
         do {
             try FileManager.default.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
         } catch {
-            appState.showToast("Couldn't move to Trash: \(error.localizedDescription)", isError: true)
+            showToast("Couldn't move to Trash: \(error.localizedDescription)", isError: true)
             return
         }
         if samePath(path, currentFile) {
@@ -669,7 +695,7 @@ public final class WorkspaceViewModel: ObservableObject {
             return
         }
         guard currentFile != nil else {
-            appState.showToast("Open a .tex file first")
+            showToast("Open a .tex file first")
             return
         }
         guard writeToDisk() else { return }
@@ -689,13 +715,13 @@ public final class WorkspaceViewModel: ObservableObject {
         guard let root = info.root else {
             isSnippetMode = true
             if announceMissingRoot {
-                appState.showToast("No \\documentclass: previewing math snippets live. Add \\documentclass to compile.")
+                showToast("No \\documentclass: previewing math snippets live. Add \\documentclass to compile.")
             }
             return
         }
         guard appState.texFound || texPathOverride != nil else {
             if announceMissingRoot {
-                appState.showToast("LaTeX isn't installed. Install MacTeX to build PDFs.", isError: true)
+                showToast("LaTeX isn't installed. Install MacTeX to build PDFs.", isError: true)
             }
             return
         }
@@ -727,7 +753,7 @@ public final class WorkspaceViewModel: ObservableObject {
         guard rootTexPath == root else { return }  // root changed while compiling
         switch outcome {
         case .failure(let err):
-            appState.showToast("Compile failed: \(err.localizedDescription)", isError: true)
+            showToast("Compile failed: \(err.localizedDescription)", isError: true)
         case .success(let res):
             if res.cancelled || res.superseded || !texRunner.isCurrentRun(res.runID) { return }
             compileResult = res
@@ -738,9 +764,9 @@ public final class WorkspaceViewModel: ObservableObject {
                 pdfDocument = doc
             }  // else keep the previous PDF on screen
             if res.timedOut {
-                appState.showToast("Compilation took longer than 5 minutes and was stopped. See the Log.")
+                showToast("Compilation took longer than 5 minutes and was stopped. See the Log.")
             } else if res.ok {
-                appState.showToast(String(format: "Compiled in %.1f s", Double(res.elapsedMs) / 1000.0))
+                showToast(String(format: "Compiled in %.1f s", Double(res.elapsedMs) / 1000.0))
             }
             if !res.ok {
                 selectedProblemID = nil
@@ -756,7 +782,7 @@ public final class WorkspaceViewModel: ObservableObject {
     public func syncForward() {
         guard mode == .latex else { return }
         guard let file = currentFile, let pdf = activePdfPath, pdfDocument != nil else {
-            appState.showToast("Compile first to generate a PDF")
+            showToast("Compile first to generate a PDF")
             return
         }
         let line = cursorLine
@@ -767,7 +793,7 @@ public final class WorkspaceViewModel: ObservableObject {
             let spots = TexProcessRunner.synctexView(file: file, line: line, col: col, pdf: pdf, texbinOverride: texbin)
             await MainActor.run {
                 if spots.isEmpty {
-                    vm.appState.showToast("No matching SyncTeX position in PDF")
+                    vm.showToast("No matching SyncTeX position in PDF")
                 } else {
                     vm.syncTexSpots = spots
                     vm.syncTexTrigger = UUID()
@@ -786,7 +812,7 @@ public final class WorkspaceViewModel: ObservableObject {
                 if let loc {
                     vm.openFile(loc.file, revealLine: loc.line)  // same file: just reveals the line
                 } else {
-                    vm.appState.showToast("No source line found for that PDF location")
+                    vm.showToast("No source line found for that PDF location")
                 }
             }
         }
@@ -800,7 +826,7 @@ public final class WorkspaceViewModel: ObservableObject {
 
     public func performCleanBuild() {
         guard let root = rootTexPath else {
-            appState.showToast("Nothing to clean: no root document")
+            showToast("Nothing to clean: no root document")
             return
         }
         do {
@@ -808,9 +834,9 @@ public final class WorkspaceViewModel: ObservableObject {
             activePdfPath = nil
             pdfDocument = nil
             compileResult = nil
-            appState.showToast("Build files removed")
+            showToast("Build files removed")
         } catch {
-            appState.showToast("Couldn't remove build files: \(error.localizedDescription)", isError: true)
+            showToast("Couldn't remove build files: \(error.localizedDescription)", isError: true)
         }
     }
 
@@ -826,7 +852,7 @@ public final class WorkspaceViewModel: ObservableObject {
 
     public func exportPdf() {
         guard let pdf = activePdfPath, FileManager.default.fileExists(atPath: pdf) else {
-            appState.showToast("Compile first to generate a PDF")
+            showToast("Compile first to generate a PDF")
             return
         }
         let panel = NSSavePanel()
@@ -839,9 +865,9 @@ public final class WorkspaceViewModel: ObservableObject {
                 try FileManager.default.removeItem(at: dest)
             }
             try FileManager.default.copyItem(at: URL(fileURLWithPath: pdf), to: dest)
-            appState.showToast("Exported \(dest.lastPathComponent)")
+            showToast("Exported \(dest.lastPathComponent)")
         } catch {
-            appState.showToast("Export failed: \(error.localizedDescription)", isError: true)
+            showToast("Export failed: \(error.localizedDescription)", isError: true)
         }
     }
 

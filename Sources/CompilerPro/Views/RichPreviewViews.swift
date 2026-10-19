@@ -332,7 +332,7 @@ public struct MermaidPreviewView: View {
                     errorMessage: $viewModel.mermaidError,
                     exportRequest: viewModel.mermaidExportRequest,
                     onExportCompleted: { msg, isErr in
-                        viewModel.appState.showToast(msg, isError: isErr)
+                        viewModel.showToast(msg, isError: isErr)
                     }
                 )
             }
@@ -361,7 +361,7 @@ public struct MermaidPreviewView: View {
         // The canvas only exists for non-empty text, so an export of an empty diagram is answered here.
         .onChange(of: viewModel.mermaidExportRequest?.id) { _, newID in
             guard newID != nil, isEmpty else { return }
-            viewModel.appState.showToast("Export failed: the diagram is empty", isError: true)
+            viewModel.showToast("Export failed: the diagram is empty", isError: true)
         }
     }
 }

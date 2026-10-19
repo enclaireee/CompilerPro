@@ -5,29 +5,39 @@ import SwiftUI
 @main
 public struct CompilerProApp: App {
     @NSApplicationDelegateAdaptor(CompilerAppDelegate.self) private var appDelegate
-    @StateObject private var appState = AppState()
+    @ObservedObject private var appState = AppState.shared
 
     public init() { AppSettings.registerDefaults() }
 
     public var body: some Scene {
-        Window("CompilerPro", id: "main") {
-            RootContainerView(appState: appState)
-                .onAppear {
-                    appDelegate.appState = appState
-                    if !appDelegate.pendingOpenPaths.isEmpty {
-                        let paths = appDelegate.pendingOpenPaths
-                        appDelegate.pendingOpenPaths.removeAll()
-                        for path in paths {
-                            appState.openExternalPath(path)
-                        }
-                    } else {
-                        appState.restoreLastSessionIfAvailable()
-                    }
+        // Xcode-style: a compact Welcome window, and one window per open project.
+        Window("Welcome to CompilerPro", id: AppState.welcomeWindowID) {
+            WelcomeView(appState: appState)
+                .frame(width: 820, height: 500)
+                .attachingWindowActions(appState)
+                .openingDroppedFiles(appState)
+                .sheet(isPresented: $appState.showNewProjectSheet) {
+                    NewProjectSheet(appState: appState)
                 }
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .windowBackgroundDragBehavior(.enabled)
+        .defaultLaunchBehavior(.presented)
+        .restorationBehavior(.disabled)
+        .commands { AppCommands(appState: appState) }
+
+        // Separate windows get native macOS tabs (Window ▸ Merge All Windows) and side-by-side tiling for free.
+        WindowGroup(id: "project", for: ProjectRef.self) { $ref in
+            if let ref {
+                ProjectWindow(ref: ref, appState: appState)
+            }
         }
         .windowToolbarStyle(.unified)
         .defaultSize(width: 1280, height: 820)
-        .commands { AppCommands(appState: appState) }
+        .defaultLaunchBehavior(.suppressed)
+        // Our own session restore honours the "Reopen projects" setting.
+        .restorationBehavior(.disabled)
 
         Settings { SettingsView(appState: appState) }
     }
@@ -55,7 +65,7 @@ private struct AppCommands: Commands {
         TextEditingCommands()
 
         CommandGroup(replacing: .newItem) {
-            Button("New Project…") { appState.showNewProjectSheet = true }
+            Button("New Project…") { appState.newProject() }
                 .keyboardShortcut("n", modifiers: .command)
             Button("New File") { workspace?.createNewFile() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
@@ -86,7 +96,7 @@ private struct AppCommands: Commands {
             // Replacing .saveItem also removes the system Close item, so restore it.
             Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w", modifiers: .command)
-            Button("Close Project") { appState.goHome() }
+            Button("Close Project") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(workspace == nil)
         }
@@ -155,52 +165,81 @@ private struct AppCommands: Commands {
     }
 }
 
-private struct RootContainerView: View {
-    @ObservedObject var appState: AppState
-    @State private var dropTargeted = false
+/// One project window. Owns its view model for the window's lifetime.
+private struct ProjectWindow: View {
+    let appState: AppState
+    @StateObject private var viewModel: WorkspaceViewModel
+
+    init(ref: ProjectRef, appState: AppState) {
+        self.appState = appState
+        _viewModel = StateObject(wrappedValue: WorkspaceViewModel(
+            mode: ref.mode,
+            folder: ref.folder,
+            initialFile: appState.takePendingFile(for: ref),
+            appState: appState
+        ))
+    }
 
     var body: some View {
-        Group {
-            switch appState.screen {
-            case .welcome:
-                WelcomeView(appState: appState)
-            case .workspace(let vm):
-                WorkspaceView(viewModel: vm, appState: appState)
+        WorkspaceView(viewModel: viewModel, appState: appState)
+            .attachingWindowActions(appState)
+            .openingDroppedFiles(appState)
+            // Teardown happens on the window's real close (WorkspaceView's WindowStateBinder).
+            .onAppear { appState.register(viewModel) }
+    }
+}
+
+private extension View {
+    /// Gives AppState the window actions so menus, Finder and the Dock can open windows.
+    func attachingWindowActions(_ appState: AppState) -> some View {
+        modifier(WindowActionsAttacher(appState: appState))
+    }
+
+    func openingDroppedFiles(_ appState: AppState) -> some View {
+        modifier(FileDropTarget(appState: appState))
+    }
+}
+
+private struct WindowActionsAttacher: ViewModifier {
+    let appState: AppState
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    func body(content: Content) -> some View {
+        content.onAppear { appState.attach(openWindow: openWindow, dismissWindow: dismissWindow) }
+    }
+}
+
+private struct FileDropTarget: ViewModifier {
+    let appState: AppState
+    @State private var targeted = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                if targeted {
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(Color.accentColor, lineWidth: 3)
+                        .padding(4)
+                        .allowsHitTesting(false)
+                }
             }
-        }
-        .sheet(isPresented: $appState.showNewProjectSheet) {
-            NewProjectSheet(appState: appState)
-        }
-        .alert(item: $appState.alert) { a in
-            Alert(title: Text(a.title), message: Text(a.message), dismissButton: .default(Text("OK")))
-        }
-        .overlay {
-            if dropTargeted {
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(Color.accentColor, lineWidth: 3)
-                    .padding(4)
-                    .allowsHitTesting(false)
-            }
-        }
-        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
-            for provider in providers {
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    if let path = url?.path {
-                        Task { @MainActor in
-                            appState.openExternalPath(path)
+            .onDrop(of: [.fileURL], isTargeted: $targeted) { providers in
+                for provider in providers {
+                    _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                        if let path = url?.path {
+                            Task { @MainActor in appState.openExternalPath(path) }
                         }
                     }
                 }
+                return true
             }
-            return true
-        }
     }
 }
 
 @MainActor
 public final class CompilerAppDelegate: NSObject, NSApplicationDelegate {
-    public weak var appState: AppState?
-    public var pendingOpenPaths: [String] = []
+    private var appState: AppState { .shared }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -212,23 +251,24 @@ public final class CompilerAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func application(_ application: NSApplication, open urls: [URL]) {
-        let paths = urls.filter(\.isFileURL).map(\.path)
-        if let appState {
-            for p in paths {
-                appState.openExternalPath(p)
-            }
-        } else {
-            pendingOpenPaths.append(contentsOf: paths)
+        // Before the first window appears, AppState queues these and opens them instead of restoring.
+        for url in urls where url.isFileURL {
+            appState.openExternalPath(url.path)
         }
     }
 
+    public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { appState.showWelcome() }
+        return false
+    }
+
     public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if let ws = appState?.activeWorkspace {
-            guard ws.confirmCloseIfNeeded() else {
-                return .terminateCancel
-            }
-            ws.teardown()
+        let workspaces = Array(appState.openWorkspaces.values)
+        for ws in workspaces {
+            guard ws.confirmCloseIfNeeded() else { return .terminateCancel }
         }
+        appState.isTerminating = true
+        workspaces.forEach { $0.teardown() }
         return .terminateNow
     }
 }

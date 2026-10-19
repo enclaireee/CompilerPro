@@ -27,7 +27,7 @@ public struct WorkspaceView: View {
         } detail: {
             VStack(spacing: 0) {
                 detailContent
-                StatusBar(viewModel: viewModel, appState: appState)
+                StatusBar(viewModel: viewModel)
             }
             .inspector(isPresented: problemsBinding) {
                 ProblemsInspector(viewModel: viewModel)
@@ -42,9 +42,18 @@ public struct WorkspaceView: View {
         .background(
             WindowStateBinder(
                 isEdited: viewModel.isDirty,
-                fileURL: viewModel.currentFile.map { URL(fileURLWithPath: $0) }
+                fileURL: viewModel.currentFile.map { URL(fileURLWithPath: $0) },
+                shouldClose: { [weak viewModel] in viewModel?.confirmCloseIfNeeded() ?? true },
+                didClose: { [weak viewModel, appState] in
+                    guard let viewModel else { return }
+                    viewModel.teardown()
+                    appState.unregister(viewModel)
+                }
             )
         )
+        .alert(item: $viewModel.alert) { a in
+            Alert(title: Text(a.title), message: Text(a.message), dismissButton: .default(Text("OK")))
+        }
         .sheet(isPresented: $viewModel.isQuickOpenVisible) {
             QuickOpenView(viewModel: viewModel)
         }
@@ -242,9 +251,26 @@ public struct WorkspaceView: View {
 private struct WindowStateBinder: NSViewRepresentable {
     let isEdited: Bool
     let fileURL: URL?
+    let shouldClose: () -> Bool
+    let didClose: () -> Void
 
     final class Coordinator {
         weak var window: NSWindow?
+        let closeGuard = CloseGuard()
+        var didClose: () -> Void = {}
+        private var closeObserver: NSObjectProtocol?
+
+        /// A real close, unlike onDisappear, which also fires when tabs merge or hide.
+        func observeClose(of window: NSWindow) {
+            guard closeObserver == nil else { return }
+            closeObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification, object: window, queue: .main
+            ) { [weak self] _ in self?.didClose() }
+        }
+
+        deinit {
+            if let closeObserver { NotificationCenter.default.removeObserver(closeObserver) }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -253,11 +279,15 @@ private struct WindowStateBinder: NSViewRepresentable {
 
     func updateNSView(_ view: NSView, context: Context) {
         let coordinator = context.coordinator
+        coordinator.closeGuard.shouldClose = shouldClose
+        coordinator.didClose = didClose
         let edited = isEdited
         let url = fileURL
         DispatchQueue.main.async { [weak view] in
             guard let window = view?.window else { return }
             coordinator.window = window
+            coordinator.closeGuard.install(on: window)
+            coordinator.observeClose(of: window)
             window.isDocumentEdited = edited
             if window.representedURL != url { window.representedURL = url }
         }
@@ -266,5 +296,31 @@ private struct WindowStateBinder: NSViewRepresentable {
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
         coordinator.window?.isDocumentEdited = false
         coordinator.window?.representedURL = nil
+    }
+}
+
+/// Asks to save before any close path (close button, tab ✕, ⌘W) by wrapping SwiftUI's window delegate.
+/// ponytail: forwards everything else to SwiftUI's delegate; if SwiftUI swaps the delegate, the next update re-wraps it.
+final class CloseGuard: NSObject, NSWindowDelegate {
+    var shouldClose: () -> Bool = { true }
+    private weak var original: NSWindowDelegate?
+
+    func install(on window: NSWindow) {
+        guard window.delegate !== self else { return }
+        original = window.delegate
+        window.delegate = self
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard shouldClose() else { return false }
+        return original?.windowShouldClose?(sender) ?? true
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || (original?.responds(to: selector) ?? false)
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        original
     }
 }

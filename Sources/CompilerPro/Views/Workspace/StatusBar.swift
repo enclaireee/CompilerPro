@@ -3,7 +3,6 @@ import SwiftUI
 
 struct StatusBar: View {
     @ObservedObject var viewModel: WorkspaceViewModel
-    @ObservedObject var appState: AppState
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,7 +19,7 @@ struct StatusBar: View {
 
                 Spacer(minLength: 8)
 
-                if let message = appState.statusMessage {
+                if let message = viewModel.statusMessage {
                     Text(message)
                         .lineLimit(1)
                         .truncationMode(.tail)

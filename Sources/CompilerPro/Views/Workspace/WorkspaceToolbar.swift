@@ -6,10 +6,10 @@ struct WorkspaceToolbar: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            Button { appState.goHome() } label: {
+            Button { NSApp.keyWindow?.performClose(nil) } label: {
                 Label("Close Project", systemImage: "house")
             }
-            .help("Close Project and return to the Welcome screen (⇧⌘W)")
+            .help("Close Project (⇧⌘W)")
         }
 
         ToolbarItem(placement: .principal) {
