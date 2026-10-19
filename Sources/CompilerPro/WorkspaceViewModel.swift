@@ -705,8 +705,7 @@ public final class WorkspaceViewModel: ObservableObject {
         texEngine = info.engine
 
         let runID = texRunner.reserveRunID()
-        latestRunID = runID
-        texRunner.cancelCompile()  // restart: the older run's result is ignored via `runID`
+        latestRunID = runID  // reserving cancels any older run; its result is ignored via `runID`
         isCompiling = true
         let manual = announceMissingRoot  // true only for toolbar/menu/⌘↩ builds
 
