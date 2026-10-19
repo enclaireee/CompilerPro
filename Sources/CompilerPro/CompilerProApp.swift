@@ -87,6 +87,7 @@ private struct AppCommands: Commands {
             Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w", modifiers: .command)
             Button("Close Project") { appState.goHome() }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
                 .disabled(workspace == nil)
         }
 

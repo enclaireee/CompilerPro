@@ -5,6 +5,13 @@ struct WorkspaceToolbar: ToolbarContent {
     @ObservedObject var appState: AppState
 
     var body: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            Button { appState.goHome() } label: {
+                Label("Close Project", systemImage: "house")
+            }
+            .help("Close Project and return to the Welcome screen (⇧⌘W)")
+        }
+
         ToolbarItem(placement: .principal) {
             Picker("Layout", selection: $viewModel.layout) {
                 ForEach(EditorLayout.allCases, id: \.self) { layout in
