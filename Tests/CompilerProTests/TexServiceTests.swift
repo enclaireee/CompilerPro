@@ -69,6 +69,25 @@ final class TexServiceTests: XCTestCase {
         XCTAssertGreaterThan(res.log.count, 250_000)
     }
 
+    func testSkippedFailedBuildShowsPreviousLog() throws {
+        let buildDir = dir.appendingPathComponent(TexService.outDir)
+        try FileManager.default.createDirectory(at: buildDir, withIntermediateDirectories: true)
+        let oldLog = buildDir.appendingPathComponent("main.log")
+        try "./main.tex:3: Undefined control sequence.\nl.3 \\foo\n".write(to: oldLog, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-60)], ofItemAtPath: oldLog.path)
+        let (runner, root) = try fakeLatexmk("""
+        echo "Latexmk: Nothing to do for './main.tex'."
+        echo "  pdflatex: gave an error in previous invocation of latexmk."
+        exit 12
+        """)
+        let (exp, result) = compileAsync(runner, root)
+        wait(for: [exp], timeout: 10)
+        let res = try XCTUnwrap(result())
+        XCTAssertFalse(res.ok)
+        XCTAssertTrue(res.log.contains("Undefined control sequence"))
+        XCTAssertFalse(res.diagnostics.isEmpty)
+    }
+
     func testCancelKillsWholeProcessGroup() throws {
         let pidFile = dir.appendingPathComponent("pids").path
         let (runner, root) = try fakeLatexmk("""

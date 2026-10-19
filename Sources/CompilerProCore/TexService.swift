@@ -609,12 +609,19 @@ public final class TexProcessRunner: @unchecked Sendable {
 
         let logPath = (pdf as NSString).deletingPathExtension + ".log"
         let logMtime = (try? fm.attributesOfItem(atPath: logPath))?[.modificationDate] as? Date
+        let outputText = String(decoding: output, as: UTF8.self)
+        // Nothing changed since a failed build: latexmk skips the engine and only reports that the
+        // last run failed. That run's .log still holds the real error, so show it instead.
+        let skippedFailedBuild = outputText.contains("gave an error in previous invocation of latexmk")
         var log: String
         if let logMtime, logMtime >= startDate.addingTimeInterval(-1),
            let data = fm.contents(atPath: logPath) {
             log = String(decoding: data, as: UTF8.self)
+        } else if skippedFailedBuild, let data = fm.contents(atPath: logPath) {
+            log = "Nothing changed since the last build, which failed. Showing its log; fix the error and compile again.\n\n"
+                + String(decoding: data, as: UTF8.self)
         } else {
-            log = String(decoding: output, as: UTF8.self)
+            log = outputText
         }
         if timedOut {
             log = "Compilation timed out after \(Int(timeout)) seconds and was stopped.\n\n" + log
