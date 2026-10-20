@@ -1,38 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
   <defs>
-    <linearGradient id="tileS" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FBFBFD"/>
-      <stop offset="1" stop-color="#E2E2EA"/>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0A84FF"/>
+      <stop offset="1" stop-color="#0062D6"/>
     </linearGradient>
-    <linearGradient id="blueS" x1="0" y1="0" x2="0.25" y2="1">
-      <stop offset="0" stop-color="#45A8FF"/>
-      <stop offset="1" stop-color="#0060DC"/>
-    </linearGradient>
-    <clipPath id="tileClipS"><rect x="100" y="100" width="824" height="824" rx="186"/></clipPath>
-    <clipPath id="pageClipS"><rect x="-235" y="-300" width="470" height="600" rx="26"/></clipPath>
   </defs>
 
-  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#tileS)"/>
-  <rect x="100" y="100" width="824" height="824" rx="186" fill="none" stroke="#000000" stroke-opacity="0.08" stroke-width="4"/>
+  <rect x="3.1" y="3.1" width="25.8" height="25.8" rx="5.8" fill="url(#tile)"/>
 
-  <g clip-path="url(#tileClipS)">
-    <g transform="translate(490,486) rotate(-6)">
-      <rect x="-235" y="-300" width="470" height="600" rx="26" fill="#FFFFFF"/>
-      <g clip-path="url(#pageClipS)">
-        <path d="M 235 -300 L 235 -214 A 20 20 0 0 1 215 -194 L 129 -194 Z" fill="#E9E9EF"/>
-        <g fill="#BEBEC6">
-          <rect x="-170" y="-208" width="232" height="24" rx="12"/>
-          <rect x="-170" y="-150" width="326" height="24" rx="12"/>
-          <rect x="-170" y="-92" width="288" height="24" rx="12"/>
-          <rect x="-170" y="-34" width="326" height="24" rx="12"/>
-        </g>
-      </g>
-      <rect x="-235" y="-300" width="470" height="600" rx="26" fill="none" stroke="#000000" stroke-opacity="0.10" stroke-width="4"/>
-    </g>
-
-    <g transform="translate(700,692)">
-      <circle r="146" fill="url(#blueS)"/>
-      <path d="M -38 -54 L 60 0 L -38 54 Z" fill="#FFFFFF"/>
-    </g>
+  <!-- Small cut: heavier dots, tighter triangle, drawn on the pixel grid. -->
+  <g fill="#FFFFFF">
+    <circle cx="16" cy="11.5" r="3.1"/>
+    <circle cx="10.8" cy="20.5" r="3.1"/>
+    <circle cx="21.2" cy="20.5" r="3.1"/>
   </g>
 </svg>

@@ -22,20 +22,22 @@ Trademark and domain checks are **not** done. Do those before shipping the name.
 
 ## 2. The icon
 
-A white page with a system-blue play button. The page is the document; the play is what
-the app adds — press it and the source becomes the page.
+Three dots in a triangle: **∴**, the sign for *therefore*. A proof ends in a conclusion,
+and so does a compile. It is mathematical and typographic at once, and it is neither a
+page nor a letter — the two things the icon deliberately avoids.
 
 - Built on Apple’s macOS icon grid: 1024 px canvas, 824 px rounded square,
   186 px corners, 100 px inset.
-- Same light material as the iWork icons: white to `#F0F0F5`, a hairline edge and a
-  soft shadow. No texture, no gradient on the glyph, no lettering.
-- One accent only: system blue. The play button is the same control language as the
-  run button in Xcode.
-- Two cuts: standard from 64 px up, and a small-size cut at 16–32 px with a larger page,
-  heavier rules and a bigger play button.
+- One material: system blue, `#0A84FF` to `#0062D6`, with pure white dots and a soft
+  shadow. No texture, no gloss, no lettering.
+- The dots sit on an equilateral triangle, apex up, optically centred: the bounding box
+  is 10 px above the tile centre, because a triangle carries its weight at the base.
+- Two cuts: the standard cut from 64 px up (dot radius 68), and a small cut at 16–32 px
+  drawn on the pixel grid with heavier dots (radius 3.1 at 32 px, 1.55 at 16 px).
 
-Rules: never outline, gradient, bevel or gloss the tile; never add the app name to the
-icon; never use a colour other than system blue for the play button.
+Rules: never put a page, a letter, a play button or the app name in the icon; never
+outline, bevel or gloss the tile; keep the three dots equal in size and pure white; keep
+the tile system blue.
 
 ## 3. Colour
 
@@ -43,7 +45,7 @@ Use the system, not a palette.
 
 | Role | Value | Use |
 | --- | --- | --- |
-| System blue | `#0071E3` light · `#0A84FF` dark | Play button, links, compile action |
+| System blue | `#0071E3` light · `#0A84FF` dark | Icon tile, links, compile action |
 | System grey | `#F5F5F7` | Sidebars, toolbars, alternating rows |
 | Label | `#1D1D1F` / semantic | All text — use system label colours, not fixed hex |
 | Teal | system | LaTeX badge |
@@ -79,9 +81,10 @@ brand/
   brand-board.html             icon and identity page (open in a browser)
   icon/
     proof-icon.svg             master, 1024 px grid
-    proof-icon-small.svg       small-size cut (16–32 px)
+    proof-icon-small.svg       32 px cut, drawn on the pixel grid
+    proof-icon-small-16.svg    16 px cut
     proof-icon-1024.png        rendered master
-    proof-small-1024.png       rendered small cut
+    build-icons.sh             rebuilds the iconset and the .icns
     AppIcon.icns               ready for Sources/Proof/Resources/AppIcon.icns
     Proof.iconset/             full macOS icon set
     old-compilerpro.png        the icon being replaced (for comparison)
