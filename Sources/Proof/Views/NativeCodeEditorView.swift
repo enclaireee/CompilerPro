@@ -1,5 +1,5 @@
 import AppKit
-import CompilerProCore
+import ProofCore
 import SwiftUI
 
 public struct NativeCodeEditorView: NSViewRepresentable {
@@ -45,7 +45,7 @@ public struct NativeCodeEditorView: NSViewRepresentable {
         Coordinator(parent: self)
     }
 
-    static func applyWrap(_ wrap: Bool, scrollView: NSScrollView, textView: CompilerTextView) {
+    static func applyWrap(_ wrap: Bool, scrollView: NSScrollView, textView: ProofTextView) {
         guard let tc = textView.textContainer else { return }
         scrollView.hasHorizontalScroller = !wrap
         textView.isHorizontallyResizable = !wrap
@@ -83,7 +83,7 @@ public struct NativeCodeEditorView: NSViewRepresentable {
         let textContainer = NSTextContainer(containerSize: NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude))
         layoutManager.addTextContainer(textContainer)
 
-        let textView = CompilerTextView(frame: NSRect(origin: .zero, size: contentSize), textContainer: textContainer)
+        let textView = ProofTextView(frame: NSRect(origin: .zero, size: contentSize), textContainer: textContainer)
         textView.minSize = NSSize(width: 0, height: contentSize.height)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
@@ -208,7 +208,7 @@ public struct NativeCodeEditorView: NSViewRepresentable {
     @MainActor
     public final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: NativeCodeEditorView
-        weak var textView: CompilerTextView?
+        weak var textView: ProofTextView?
         weak var rulerView: LineNumberRulerView?
         var loadedFileKey: String?
         var isEditing = false
@@ -231,7 +231,7 @@ public struct NativeCodeEditorView: NSViewRepresentable {
             }
         }
 
-        func setupNotifications(scrollView: NSScrollView, textView: CompilerTextView) {
+        func setupNotifications(scrollView: NSScrollView, textView: ProofTextView) {
             scrollView.contentView.postsBoundsChangedNotifications = true
             let boundsObs = NotificationCenter.default.addObserver(
                 forName: NSView.boundsDidChangeNotification,
@@ -327,7 +327,7 @@ public struct NativeCodeEditorView: NSViewRepresentable {
 
 // MARK: - Custom NSTextView Subclass
 
-public final class CompilerTextView: NSTextView {
+public final class ProofTextView: NSTextView {
     public var mode: WorkspaceMode = .latex
     var onAppearanceChange: (() -> Void)?
 
@@ -561,9 +561,9 @@ public final class CompilerTextView: NSTextView {
 // MARK: - Line Number Ruler View
 
 public final class LineNumberRulerView: NSRulerView {
-    private weak var textView: CompilerTextView?
+    private weak var textView: ProofTextView?
 
-    init(textView: CompilerTextView) {
+    init(textView: ProofTextView) {
         self.textView = textView
         super.init(scrollView: textView.enclosingScrollView, orientation: .verticalRuler)
         self.clientView = textView
@@ -612,7 +612,7 @@ public final class LineNumberRulerView: NSRulerView {
         }
         let reachesEnd = visibleGlyphs.length == 0 || NSMaxRange(visibleGlyphs) >= glyphCount
 
-        var i = CompilerTextView.lineIndex(of: firstChar, in: starts)
+        var i = ProofTextView.lineIndex(of: firstChar, in: starts)
         while i < starts.count {
             let start = starts[i]
             let atEnd = start >= length

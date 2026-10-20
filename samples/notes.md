@@ -10,8 +10,8 @@ $$
 
 ```mermaid
 sequenceDiagram
-  Me->>CompilerPro: open notes.md
-  CompilerPro-->>Me: rendered preview
+  Me->>Proof: open notes.md
+  Proof-->>Me: rendered preview
 ```
 
 ## Safety check

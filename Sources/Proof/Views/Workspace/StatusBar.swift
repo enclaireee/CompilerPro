@@ -1,4 +1,4 @@
-import CompilerProCore
+import ProofCore
 import SwiftUI
 
 struct StatusBar: View {

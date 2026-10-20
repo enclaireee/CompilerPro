@@ -1,6 +1,6 @@
 import AppKit
 import Combine
-import CompilerProCore
+import ProofCore
 import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
@@ -280,7 +280,7 @@ public final class AppState: ObservableObject {
     private func askMode(for folder: String) -> WorkspaceMode? {
         let alert = NSAlert()
         alert.messageText = "What kind of project is “\((folder as NSString).lastPathComponent)”?"
-        alert.informativeText = "CompilerPro couldn't tell from the files inside. Pick how to open it."
+        alert.informativeText = "Proof couldn't tell from the files inside. Pick how to open it."
         for m in WorkspaceMode.allCases { alert.addButton(withTitle: m.displayName) }
         alert.addButton(withTitle: "Cancel")
         let r = alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
@@ -323,7 +323,7 @@ public final class AppState: ObservableObject {
         }
         guard let mode = WorkspaceMode.mode(forPath: path) else {
             let name = (path as NSString).lastPathComponent
-            showError("CompilerPro opens .tex, .mmd, and .md files (got \(name))")
+            showError("Proof opens .tex, .mmd, and .md files (got \(name))")
             return
         }
         if let ws = openWorkspaces.values.first(where: { $0.mode == mode && path.hasPrefix($0.folder + "/") }) {

@@ -1,8 +1,8 @@
-import CompilerProCore
+import ProofCore
 import Foundation
 import XCTest
 
-final class CompilerProTests: XCTestCase {
+final class ProofTests: XCTestCase {
     private func makeTempDir(_ name: String) throws -> URL {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("cp-swift-\(name)-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

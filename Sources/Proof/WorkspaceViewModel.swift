@@ -1,6 +1,6 @@
 import AppKit
 import Combine
-import CompilerProCore
+import ProofCore
 import Foundation
 import PDFKit
 import SwiftUI

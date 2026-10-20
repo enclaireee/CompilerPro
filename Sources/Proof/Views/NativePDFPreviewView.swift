@@ -1,5 +1,5 @@
 import AppKit
-import CompilerProCore
+import ProofCore
 import CoreImage
 import PDFKit
 import SwiftUI

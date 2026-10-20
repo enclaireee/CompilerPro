@@ -1,17 +1,17 @@
 import AppKit
-import CompilerProCore
+import ProofCore
 import SwiftUI
 
 @main
-public struct CompilerProApp: App {
-    @NSApplicationDelegateAdaptor(CompilerAppDelegate.self) private var appDelegate
+public struct ProofApp: App {
+    @NSApplicationDelegateAdaptor(ProofAppDelegate.self) private var appDelegate
     @ObservedObject private var appState = AppState.shared
 
     public init() { AppSettings.registerDefaults() }
 
     public var body: some Scene {
         // Xcode-style: a compact Welcome window, and one window per open project.
-        Window("Welcome to CompilerPro", id: AppState.welcomeWindowID) {
+        Window("Welcome to Proof", id: AppState.welcomeWindowID) {
             WelcomeView(appState: appState)
                 .frame(width: 820, height: 500)
                 .attachingWindowActions(appState)
@@ -238,7 +238,7 @@ private struct FileDropTarget: ViewModifier {
 }
 
 @MainActor
-public final class CompilerAppDelegate: NSObject, NSApplicationDelegate {
+public final class ProofAppDelegate: NSObject, NSApplicationDelegate {
     private var appState: AppState { .shared }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {

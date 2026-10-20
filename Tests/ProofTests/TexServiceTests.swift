@@ -1,4 +1,4 @@
-import CompilerProCore
+import ProofCore
 import Foundation
 import XCTest
 

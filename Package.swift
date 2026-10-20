@@ -2,31 +2,31 @@
 import PackageDescription
 
 let package = Package(
-    name: "CompilerPro",
+    name: "Proof",
     platforms: [
         .macOS("15.0")
     ],
     products: [
-        .library(name: "CompilerProCore", targets: ["CompilerProCore"]),
-        .executable(name: "CompilerPro", targets: ["CompilerPro"])
+        .library(name: "ProofCore", targets: ["ProofCore"]),
+        .executable(name: "Proof", targets: ["Proof"])
     ],
     targets: [
         .target(
-            name: "CompilerProCore",
-            path: "Sources/CompilerProCore"
+            name: "ProofCore",
+            path: "Sources/ProofCore"
         ),
         .executableTarget(
-            name: "CompilerPro",
-            dependencies: ["CompilerProCore"],
-            path: "Sources/CompilerPro",
+            name: "Proof",
+            dependencies: ["ProofCore"],
+            path: "Sources/Proof",
             resources: [
                 .copy("Resources")
             ]
         ),
         .testTarget(
-            name: "CompilerProTests",
-            dependencies: ["CompilerProCore"],
-            path: "Tests/CompilerProTests"
+            name: "ProofTests",
+            dependencies: ["ProofCore"],
+            path: "Tests/ProofTests"
         )
     ]
 )

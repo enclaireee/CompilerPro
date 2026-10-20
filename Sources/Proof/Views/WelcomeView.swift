@@ -1,5 +1,5 @@
 import AppKit
-import CompilerProCore
+import ProofCore
 import SwiftUI
 
 /// Xcode-style welcome: actions on the left, recent projects in a sidebar column on the right.
@@ -34,7 +34,7 @@ public struct WelcomeView: View {
                 .frame(width: 128, height: 128)
                 .shadow(color: .black.opacity(0.18), radius: 12, y: 6)
                 .accessibilityHidden(true)
-            Text("CompilerPro")
+            Text("Proof")
                 .font(.system(size: 34, weight: .bold))
                 .padding(.top, 12)
             Text("LaTeX, Mermaid and Markdown. Live preview, fully offline.")

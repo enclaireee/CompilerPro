@@ -1,4 +1,4 @@
-import CompilerProCore
+import ProofCore
 import Foundation
 
 /// UserDefaults keys shared by Settings and the views that read them via `@AppStorage`.
