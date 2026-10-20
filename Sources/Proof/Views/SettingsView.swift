@@ -41,6 +41,7 @@ struct TexStatusRow: View {
 
 struct SettingsView: View {
     @ObservedObject var appState: AppState
+    @ObservedObject private var updates = UpdateController.shared
 
     @AppStorage(AppSettings.appearance) private var appearance = AppThemePreference.auto.rawValue
     @AppStorage(AppSettings.restoreSession) private var restoreSession = true
@@ -52,6 +53,7 @@ struct SettingsView: View {
     @AppStorage(AppSettings.compileOnSave) private var compileOnSave = true
     @AppStorage(AppSettings.darkPDF) private var darkPDF = false
     @AppStorage(AppSettings.pdfZoomMode) private var zoomMode = "fitWidth"
+    @AppStorage(AppSettings.autoCheckUpdates) private var autoCheckUpdates = true
 
     var body: some View {
         TabView {
@@ -99,20 +101,48 @@ struct SettingsView: View {
                 }
                 Toggle("Compile automatically when saving", isOn: $compileOnSave)
                 Toggle("Dark PDF pages in dark mode", isOn: $darkPDF)
-            }
-            .tabItem { Label("LaTeX", systemImage: "function") }
-
-            Form {
                 Picker("Default PDF zoom", selection: $zoomMode) {
                     Text("Fit Width").tag("fitWidth")
                     Text("Fit Page").tag("fitPage")
                     Text("Actual Size").tag("actualSize")
                 }
             }
-            .tabItem { Label("Preview", systemImage: "doc.richtext") }
+            .tabItem { Label("LaTeX", systemImage: "function") }
+
+            Form {
+                Section {
+                    LabeledContent("Version", value: updates.currentVersion)
+                    LabeledContent("Last checked", value: lastCheckedText)
+                    HStack {
+                        Button("Check Now") { updates.checkForUpdates() }
+                            .disabled(updates.isChecking)
+                        if updates.isChecking {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Spacer()
+                    }
+                }
+                Section {
+                    Toggle("Check for updates automatically", isOn: $autoCheckUpdates)
+                    Text("Proof checks GitHub once a day at launch and tells you when a newer version is available.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Section {
+                    Link("All Releases", destination: UpdateController.releasesURL)
+                }
+            }
+            .tabItem { Label("Updates", systemImage: "arrow.triangle.2.circlepath") }
         }
         .formStyle(.grouped)
         .frame(width: 480)
+    }
+
+    private var lastCheckedText: String {
+        guard let date = updates.lastChecked else { return "Never" }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 
     private func chooseTexFolder() {

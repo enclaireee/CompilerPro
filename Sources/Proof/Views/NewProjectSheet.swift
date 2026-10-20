@@ -7,9 +7,25 @@ struct NewProjectSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var mode: WorkspaceMode = .latex
-    @State private var name = "Untitled"
-    @State private var location = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        ?? URL(fileURLWithPath: NSHomeDirectory())
+    @State private var name = NewProjectSheet.availableName()
+    @State private var location = NewProjectSheet.defaultLocation
+
+    private static var defaultLocation: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory())
+    }
+
+    /// "Untitled", or the first free "Untitled 2", "Untitled 3"… so Create is never dead on arrival.
+    private static func availableName(in directory: URL = defaultLocation) -> String {
+        let fileManager = FileManager.default
+        var candidate = "Untitled"
+        var counter = 2
+        while fileManager.fileExists(atPath: directory.appendingPathComponent(candidate).path) {
+            candidate = "Untitled \(counter)"
+            counter += 1
+        }
+        return candidate
+    }
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
     private var exists: Bool {

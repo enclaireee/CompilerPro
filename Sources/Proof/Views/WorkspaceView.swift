@@ -224,7 +224,7 @@ public struct WorkspaceView: View {
                     Text("Compile the document to see the PDF.")
                 } actions: {
                     Button("Compile") { viewModel.compileOrStop() }
-                        .disabled(!appState.texFound || viewModel.isCompiling)
+                        .disabled(viewModel.isCompiling)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .underPageBackgroundColor))

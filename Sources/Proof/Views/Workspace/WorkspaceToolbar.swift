@@ -6,10 +6,10 @@ struct WorkspaceToolbar: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            Button { NSApp.keyWindow?.performClose(nil) } label: {
-                Label("Close Project", systemImage: "house")
+            Button { appState.showWelcome() } label: {
+                Label("Home", systemImage: "house")
             }
-            .help("Close Project (⇧⌘W)")
+            .help("Home — recent projects")
         }
 
         ToolbarItem(placement: .principal) {
@@ -39,8 +39,7 @@ struct WorkspaceToolbar: ToolbarContent {
                     Label(viewModel.isCompiling ? "Stop" : "Compile",
                           systemImage: viewModel.isCompiling ? "stop.fill" : "play.fill")
                 }
-                .disabled(!viewModel.isCompiling && !appState.texFound)
-                .help(viewModel.isCompiling ? "Stop (⌘.)" : appState.texFound ? "Compile (⌘↩)" : "Install MacTeX to compile documents")
+                .help(viewModel.isCompiling ? "Stop (⌘.)" : "Compile (⌘↩)")
             }
 
             ToolbarItem(placement: .primaryAction) {
@@ -48,13 +47,6 @@ struct WorkspaceToolbar: ToolbarContent {
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    viewModel.syncForward()
-                } label: {
-                    Label("Show in PDF", systemImage: "text.viewfinder")
-                }
-                .help("Show Cursor Position in PDF (⌥⌘J)")
-
                 Button {
                     viewModel.export()
                 } label: {

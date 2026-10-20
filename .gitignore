@@ -17,3 +17,6 @@ DerivedData/
 *.out
 *.synctex.gz
 *.toc
+
+# Local builds
+build/

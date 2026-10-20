@@ -50,6 +50,7 @@ public struct WelcomeView: View {
                     symbol: "plus.square",
                     shortcut: "⌘N"
                 ) { appState.showNewProjectSheet = true }
+                    .keyboardShortcut(.defaultAction)
                 ActionRow(
                     title: "Open Existing…",
                     subtitle: "A project folder, or a .tex, .mmd or .md file",

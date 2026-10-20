@@ -204,6 +204,11 @@ public final class WorkspaceViewModel: ObservableObject {
         if let candidate = resolveInitialFile(requested: initialFile) {
             openFile(candidate)
         }
+        // A project should open showing its page, not an empty pane. Build once when there is
+        // nothing to show yet; an existing PDF is displayed as-is and left alone.
+        if mode == .latex, !isSnippetMode, rootTexPath != nil, pdfDocument == nil, appState.texFound {
+            startCompile(announceMissingRoot: false)
+        }
 
         focusObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
@@ -698,8 +703,27 @@ public final class WorkspaceViewModel: ObservableObject {
             showToast("Open a .tex file first")
             return
         }
+        guard appState.texFound || texPathOverride != nil else {
+            offerTeXSetup()
+            return
+        }
         guard writeToDisk() else { return }
         startCompile(announceMissingRoot: true)
+    }
+
+    /// A disabled Compile button is a dead end; say what is missing and offer the fix.
+    private func offerTeXSetup() {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "LaTeX isn't installed"
+        alert.informativeText = "Proof needs MacTeX to build PDFs. You can keep writing, and the math preview still works without it."
+        alert.addButton(withTitle: "Get MacTeX")
+        alert.addButton(withTitle: "Not Now")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn,
+           let url = URL(string: "https://www.tug.org/mactex/") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     public func stopCompile() {

@@ -64,6 +64,10 @@ private struct AppCommands: Commands {
         ToolbarCommands()
         TextEditingCommands()
 
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { UpdateController.shared.checkForUpdates() }
+        }
+
         CommandGroup(replacing: .newItem) {
             Button("New Project…") { appState.newProject() }
                 .keyboardShortcut("n", modifiers: .command)
@@ -96,9 +100,6 @@ private struct AppCommands: Commands {
             // Replacing .saveItem also removes the system Close item, so restore it.
             Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
                 .keyboardShortcut("w", modifiers: .command)
-            Button("Close Project") { NSApp.keyWindow?.performClose(nil) }
-                .keyboardShortcut("w", modifiers: [.command, .shift])
-                .disabled(workspace == nil)
         }
 
         CommandGroup(after: .sidebar) {
@@ -161,6 +162,12 @@ private struct AppCommands: Commands {
             if let url = URL(string: "https://www.tug.org/mactex/") {
                 Link("Get MacTeX…", destination: url)
             }
+        }
+
+        CommandGroup(after: .windowList) {
+            Divider()
+            Button("Welcome to Proof") { appState.showWelcome() }
+                .keyboardShortcut("1", modifiers: [.command, .shift])
         }
     }
 }
@@ -248,6 +255,7 @@ public final class ProofAppDelegate: NSObject, NSApplicationDelegate {
             NSApp.applicationIconImage = iconImage
         }
         NSApp.activate(ignoringOtherApps: true)
+        Task { await UpdateController.shared.checkIfDue() }
     }
 
     public func application(_ application: NSApplication, open urls: [URL]) {

@@ -14,6 +14,11 @@ public enum AppSettings {
     public static let pdfZoomMode = "cp.pdfZoomMode"        // "fitWidth" | "fitPage" | "actualSize"
     public static let restoreSession = "cp.restoreSession"  // Bool, default true
 
+    // Update check: on by default, at most once a day.
+    public static let autoCheckUpdates = "cp.autoCheckUpdates"          // Bool, default true
+    public static let lastUpdateCheck = "cp.lastUpdateCheck"            // Date of the last completed check
+    public static let offeredUpdateVersion = "cp.offeredUpdateVersion"  // Version already offered to the user
+
     public static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
             appearance: AppThemePreference.auto.rawValue,
@@ -26,6 +31,7 @@ public enum AppSettings {
             darkPDF: false,
             pdfZoomMode: "fitWidth",
             restoreSession: true,
+            autoCheckUpdates: true,
         ])
     }
 }
