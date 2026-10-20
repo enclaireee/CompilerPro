@@ -8,12 +8,14 @@ public struct NativeCodeEditorView: NSViewRepresentable {
     public let text: String
     public let revealRequest: (id: UUID, line: Int)?
     public let formatRequest: (id: UUID, kind: WorkspaceViewModel.FormatKind)?
+    public let editRequest: (id: UUID, range: NSRange, replacement: String)?
     public let onTextChange: (String) -> Void
     public let onCursorChange: (Int, Int) -> Void
     public let onTopLineChange: (Int) -> Void
     public let fontSize: CGFloat
     public let showLineNumbers: Bool
     public let wrapLines: Bool
+    public let diagnostics: [TexDiagnostic]
 
     public init(
         mode: WorkspaceMode,
@@ -21,6 +23,8 @@ public struct NativeCodeEditorView: NSViewRepresentable {
         text: String,
         revealRequest: (id: UUID, line: Int)?,
         formatRequest: (id: UUID, kind: WorkspaceViewModel.FormatKind)?,
+        editRequest: (id: UUID, range: NSRange, replacement: String)? = nil,
+        diagnostics: [TexDiagnostic] = [],
         onTextChange: @escaping (String) -> Void,
         onCursorChange: @escaping (Int, Int) -> Void,
         onTopLineChange: @escaping (Int) -> Void,
@@ -36,6 +40,8 @@ public struct NativeCodeEditorView: NSViewRepresentable {
         self.text = text
         self.revealRequest = revealRequest
         self.formatRequest = formatRequest
+        self.editRequest = editRequest
+        self.diagnostics = diagnostics
         self.onTextChange = onTextChange
         self.onCursorChange = onCursorChange
         self.onTopLineChange = onTopLineChange
@@ -74,10 +80,16 @@ public struct NativeCodeEditorView: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
         scrollView.backgroundColor = .textBackgroundColor
+        // Trackpad gestures may move both axes at once. AppKit otherwise snaps a
+        // gesture to its predominant axis, which makes diagonal scrolling impossible.
+        scrollView.usesPredominantAxisScrolling = false
 
         let contentSize = scrollView.contentSize
         let textStorage = NSTextStorage()
         let layoutManager = NSLayoutManager()
+        // Only lay out what is visible. Without this, opening a long chapter lays out
+        // the entire document before the first frame, and typing re-lays-out it all.
+        layoutManager.allowsNonContiguousLayout = true
         textStorage.addLayoutManager(layoutManager)
 
         let textContainer = NSTextContainer(containerSize: NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude))
@@ -110,6 +122,7 @@ public struct NativeCodeEditorView: NSViewRepresentable {
         textView.textContainerInset = NSSize(width: 10, height: 14)
         textView.delegate = context.coordinator
         textView.mode = mode
+        textStorage.delegate = textView
         textView.defaultParagraphStyle = SyntaxHighlighter.paragraphStyle()
         textView.typingAttributes = Self.typingAttributes(fontSize: fontSize)
         textView.setAccessibilityLabel("Source editor")
@@ -135,6 +148,7 @@ public struct NativeCodeEditorView: NSViewRepresentable {
         textView.invalidateLineIndex()
         c.loadedFileKey = fileKey
         c.fullHighlight()
+        c.applyDiagnostics(diagnostics)
         ruler.needsDisplay = true
 
         return scrollView
@@ -190,11 +204,25 @@ public struct NativeCodeEditorView: NSViewRepresentable {
         }
 
         if needsFullHighlight { c.fullHighlight() }
+        if c.appliedDiagnostics != diagnostics {
+            c.applyDiagnostics(diagnostics)
+        }
         c.rulerView?.needsDisplay = true
 
         if let req = revealRequest, req.id != c.lastRevealID {
             c.lastRevealID = req.id
             c.revealLine(req.line)
+        }
+
+        if let req = editRequest, req.id != c.lastEditID {
+            c.lastEditID = req.id
+            let length = (textView.string as NSString).length
+            if req.range.location != NSNotFound, NSMaxRange(req.range) <= length,
+               textView.shouldChangeText(in: req.range, replacementString: req.replacement) {
+                let selection = textView.selectedRanges
+                textView.insertText(req.replacement, replacementRange: req.range)
+                textView.selectedRanges = selection
+            }
         }
 
         if let fmt = formatRequest, fmt.id != c.lastFormatID {
@@ -215,10 +243,13 @@ public struct NativeCodeEditorView: NSViewRepresentable {
         var isProgrammaticChange = false
         var lastRevealID: UUID?
         var lastFormatID: UUID?
+        var lastEditID: UUID?
         var appliedFontSize: CGFloat = 13
         var appliedWrap = true
         var appliedMode: WorkspaceMode?
+        var appliedDiagnostics: [TexDiagnostic] = []
         private var blocks: [NSRange] = []
+        private var lastTextLength = 0
         private var observers: [NSObjectProtocol] = []
 
         init(parent: NativeCodeEditorView) {
@@ -250,12 +281,14 @@ public struct NativeCodeEditorView: NSViewRepresentable {
             guard let ts = textView?.textStorage else { return }
             let mode = parent.mode
             blocks = SyntaxHighlighter.blocks(in: ts.string as NSString, mode: mode)
+            lastTextLength = ts.length
             SyntaxHighlighter.highlight(textStorage: ts, mode: mode, fontSize: parent.fontSize, range: nil, blocks: blocks)
+            applyDiagnosticAttributes(limitedTo: nil)
         }
 
         /// Re-highlights only the edited paragraph (plus any enclosing code block);
         /// falls back to a full pass when a fence/verbatim delimiter is involved.
-        private func highlightEdited(_ edited: NSRange) {
+        private func highlightEdited(_ edited: NSRange, delta: Int) {
             guard let ts = textView?.textStorage else { return }
             let len = ts.length
             guard len > 0 else { return }
@@ -264,16 +297,28 @@ public struct NativeCodeEditorView: NSViewRepresentable {
             let ns = ts.string as NSString
             var range = ns.paragraphRange(for: NSRange(location: edited.location, length: min(edited.length, len - edited.location)))
             if mode != .mermaid {
-                let newBlocks = SyntaxHighlighter.blocks(in: ns, mode: mode)
-                if newBlocks.count != blocks.count || SyntaxHighlighter.containsDelimiter(ns.substring(with: range), mode: mode) {
+                if SyntaxHighlighter.containsDelimiter(ns.substring(with: range), mode: mode) {
                     return fullHighlight()
                 }
-                for b in newBlocks where b.location <= NSMaxRange(range) && NSMaxRange(b) >= range.location {
+                // Shift cached block ranges instead of rescanning the whole document.
+                let oldEnd = edited.location + edited.length - delta
+                let oldRange = NSRange(location: edited.location, length: max(0, oldEnd - edited.location))
+                if blocks.contains(where: { NSIntersectionRange($0, oldRange).length > 0 }) {
+                    return fullHighlight()
+                }
+                if delta != 0 {
+                    blocks = blocks.map { block in
+                        block.location >= oldEnd
+                            ? NSRange(location: block.location + delta, length: block.length)
+                            : block
+                    }
+                }
+                for b in blocks where b.location <= NSMaxRange(range) && NSMaxRange(b) >= range.location {
                     range = NSUnionRange(range, b)
                 }
-                blocks = newBlocks
             }
             SyntaxHighlighter.highlight(textStorage: ts, mode: mode, fontSize: parent.fontSize, range: range, blocks: blocks)
+            applyDiagnosticAttributes(limitedTo: range)
         }
 
         public func textDidChange(_ notification: Notification) {
@@ -282,10 +327,73 @@ public struct NativeCodeEditorView: NSViewRepresentable {
             parent.onTextChange(textView.string)
             isEditing = false
 
-            textView.invalidateLineIndex()
-            highlightEdited(textView.textStorage?.editedRange ?? NSRange(location: NSNotFound, length: 0))
+            let length = textView.textStorage?.length ?? 0
+            let delta = length - lastTextLength
+            lastTextLength = length
+            highlightEdited(textView.textStorage?.editedRange ?? NSRange(location: NSNotFound, length: 0), delta: delta)
             rulerView?.needsDisplay = true
             textView.needsDisplay = true
+        }
+
+        // MARK: Diagnostics
+
+        /// Errors get a red wash and an underline; warnings get amber. Both also
+        /// appear as dots in the gutter, so a problem is visible without opening the panel.
+        func applyDiagnostics(_ diagnostics: [TexDiagnostic]) {
+            appliedDiagnostics = diagnostics
+            removeDiagnosticAttributes()
+            diagnosticRanges = []
+            guard let textView, let file = parent.fileKey else {
+                rulerView?.diagnosticLines = [:]
+                return
+            }
+            let target = URL(fileURLWithPath: file).standardizedFileURL.path
+            var marks: [Int: Bool] = [:]
+            var ranges: [(NSRange, Bool)] = []
+            for diag in diagnostics {
+                let diagPath = diag.file.isEmpty ? target : URL(fileURLWithPath: diag.file).standardizedFileURL.path
+                guard diagPath == target else { continue }
+                let line = max(1, diag.line)
+                marks[line] = marks[line] == true || !diag.isWarning
+                ranges.append((textView.contentRange(forLine: line), diag.isWarning))
+            }
+            rulerView?.diagnosticLines = marks
+            diagnosticRanges = ranges
+            applyDiagnosticAttributes(limitedTo: nil)
+        }
+
+        private var diagnosticRanges: [(NSRange, Bool)] = []
+
+        /// Clears the previous build's marks, including when the new build is clean.
+        private func removeDiagnosticAttributes() {
+            guard let storage = textView?.textStorage, !diagnosticRanges.isEmpty else { return }
+            let full = NSRange(location: 0, length: storage.length)
+            storage.beginEditing()
+            for (range, _) in diagnosticRanges {
+                let target = NSIntersectionRange(range, full)
+                guard target.length > 0 else { continue }
+                storage.removeAttribute(.backgroundColor, range: target)
+                storage.removeAttribute(.underlineStyle, range: target)
+                storage.removeAttribute(.underlineColor, range: target)
+            }
+            storage.endEditing()
+        }
+
+        private func applyDiagnosticAttributes(limitedTo limit: NSRange?) {
+            guard let storage = textView?.textStorage, !diagnosticRanges.isEmpty else { return }
+            let full = NSRange(location: 0, length: storage.length)
+            storage.beginEditing()
+            for (range, isWarning) in diagnosticRanges {
+                let target = NSIntersectionRange(range, limit ?? full)
+                guard target.length > 0 else { continue }
+                let color = isWarning ? NSColor.systemYellow : NSColor.systemRed
+                storage.addAttributes([
+                    .backgroundColor: color.withAlphaComponent(isWarning ? 0.07 : 0.09),
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                    .underlineColor: color.withAlphaComponent(0.85)
+                ], range: target)
+            }
+            storage.endEditing()
         }
 
         public func textViewDidChangeSelection(_ notification: Notification) {
@@ -327,7 +435,7 @@ public struct NativeCodeEditorView: NSViewRepresentable {
 
 // MARK: - Custom NSTextView Subclass
 
-public final class ProofTextView: NSTextView {
+public final class ProofTextView: NSTextView, NSTextStorageDelegate {
     public var mode: WorkspaceMode = .latex
     var onAppearanceChange: (() -> Void)?
 
@@ -346,14 +454,58 @@ public final class ProofTextView: NSTextView {
 
     func invalidateLineIndex() { lineIndexDirty = true }
 
-    public override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
-        lineIndexDirty = true
-        return super.shouldChangeText(in: affectedCharRange, replacementString: replacementString)
+    /// Keeps the line index in sync with edits without rescanning the document.
+    /// A full rescan is used only when the index was never built or the length
+    /// bookkeeping does not match (e.g. after a programmatic bulk replace).
+    public func textStorage(
+        _ textStorage: NSTextStorage,
+        didProcessEditing editedMask: NSTextStorageEditActions,
+        range editedRange: NSRange,
+        changeInLength delta: Int
+    ) {
+        guard editedMask.contains(.editedCharacters) else { return }
+        guard !lineIndexDirty, lineIndexLength >= 0,
+              lineIndexLength + delta == textStorage.length else {
+            lineIndexDirty = true
+            return
+        }
+        applyIncrementalLineIndex(editedRange: editedRange, delta: delta, storage: textStorage)
+        lineIndexLength = textStorage.length
     }
 
-    public override func didChangeText() {
-        lineIndexDirty = true
-        super.didChangeText()
+    private func applyIncrementalLineIndex(editedRange: NSRange, delta: Int, storage: NSTextStorage) {
+        let newLocation = editedRange.location
+        let newEnd = editedRange.location + editedRange.length
+        let oldEnd = newEnd - delta
+        guard newLocation <= lineIndexLength, oldEnd >= 0, oldEnd <= lineIndexLength else {
+            lineIndexDirty = true
+            return
+        }
+        let starts = lineStarts
+        let lineIdx = Self.lineIndex(of: newLocation, in: starts)
+        let lineStart = starts[lineIdx]
+
+        // Drop cached starts that lived inside the replaced range.
+        var endIdx = lineIdx + 1
+        while endIdx < starts.count && starts[endIdx] <= oldEnd { endIdx += 1 }
+
+        // Rebuild only the starts inside the edited line(s), from the new text.
+        var rebuilt: [Int] = []
+        if newEnd > lineStart, newEnd <= storage.length {
+            let ns = storage.string as NSString
+            let limit = min(newEnd, ns.length)
+            var i = lineStart
+            while i < limit {
+                if ns.character(at: i) == 10 { rebuilt.append(i + 1) }
+                i += 1
+            }
+        }
+
+        var tail = Array(starts[endIdx...])
+        if delta != 0 {
+            for i in tail.indices { tail[i] += delta }
+        }
+        lineStarts = Array(starts[0...lineIdx]) + rebuilt + tail
     }
 
     public override func viewDidChangeEffectiveAppearance() {
@@ -562,6 +714,8 @@ public final class ProofTextView: NSTextView {
 
 public final class LineNumberRulerView: NSRulerView {
     private weak var textView: ProofTextView?
+    /// Line number -> true when the line has at least one error, false for warnings only.
+    var diagnosticLines: [Int: Bool] = [:]
 
     init(textView: ProofTextView) {
         self.textView = textView
@@ -633,6 +787,11 @@ public final class LineNumberRulerView: NSRulerView {
             let attrs = (i + 1 == activeLine) ? activeAttrs : defaultAttrs
             let size = label.size(withAttributes: attrs)
             label.draw(at: NSPoint(x: ruleThickness - size.width - 10, y: y + (lineRect.height - size.height) * 0.5), withAttributes: attrs)
+            if let isError = diagnosticLines[i + 1] {
+                (isError ? NSColor.systemRed : NSColor.systemYellow).setFill()
+                let dot = NSBezierPath(ovalIn: NSRect(x: 6, y: y + (lineRect.height - 6) * 0.5, width: 6, height: 6))
+                dot.fill()
+            }
             i += 1
         }
     }

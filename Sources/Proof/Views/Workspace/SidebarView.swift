@@ -34,6 +34,7 @@ struct SidebarView: View {
                     Text("Create a file to get started.")
                 } actions: {
                     Button("New File…") { viewModel.createNewFile() }
+                    Button("New Folder…") { viewModel.createNewFolder() }
                 }
             } else {
                 list
@@ -44,16 +45,19 @@ struct SidebarView: View {
             VStack(spacing: 0) {
                 Divider()
                 HStack {
-                    Button {
-                        viewModel.createNewFile()
+                    Menu {
+                        Button("New File…") { viewModel.createNewFile() }
+                        Button("New Folder…") { viewModel.createNewFolder() }
                     } label: {
                         Image(systemName: "plus")
                             .frame(width: 28, height: 28)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.borderless)
-                    .help("New File… (⇧⌘N)")
-                    .accessibilityLabel("New File")
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("New File or Folder")
+                    .accessibilityLabel("New")
                     Spacer()
                 }
                 .padding(.horizontal, 6)
@@ -135,9 +139,14 @@ struct SidebarView: View {
         if let path = paths.first {
             if viewModel.isDirectory(path) {
                 Button("New File…") { viewModel.createNewFile(in: path) }
+                Button("New Folder…") { viewModel.createNewFolder(in: path) }
+                Divider()
                 Button("Show in Finder") { viewModel.revealInFinder(path) }
             } else {
                 Button("Open") { viewModel.openFile(path) }
+                if viewModel.mode == .latex, ["tex", "ltx"].contains((path as NSString).pathExtension.lowercased()) {
+                    Button("Set as Main File") { viewModel.setAsMainFile(path) }
+                }
                 Button("Rename…") { viewModel.requestRename(path) }
                 Button("Duplicate") { viewModel.duplicateFile(path) }
                 Button("Show in Finder") { viewModel.revealInFinder(path) }
@@ -146,6 +155,7 @@ struct SidebarView: View {
             }
         } else {
             Button("New File…") { viewModel.createNewFile() }
+            Button("New Folder…") { viewModel.createNewFolder() }
         }
     }
 
@@ -156,6 +166,12 @@ struct SidebarView: View {
         case "sty", "cls": return "gearshape"
         case "mmd", "mermaid": return "point.3.connected.trianglepath.dotted"
         case "md", "markdown": return "doc.richtext"
+        case "png", "jpg", "jpeg", "gif", "webp", "heic", "tif", "tiff", "svg": return "photo"
+        case "pdf": return "doc.richtext"
+        case "json": return "curlybraces"
+        case "csv", "tsv", "xls", "xlsx": return "tablecells"
+        case "yml", "yaml", "toml": return "list.bullet.indent"
+        case "sh", "py", "lua", "js", "css", "html": return "chevron.left.forwardslash.chevron.right"
         default: return "doc"
         }
     }

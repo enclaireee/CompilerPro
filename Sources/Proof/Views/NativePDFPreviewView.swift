@@ -4,16 +4,26 @@ import CoreImage
 import PDFKit
 import SwiftUI
 
+public enum PDFAction: Equatable {
+    case print
+    case find(String, forward: Bool)
+    case clearFind
+    case goToPage(Int)
+}
+
 public struct NativePDFPreviewView: NSViewRepresentable {
     public let document: PDFDocument?
     public let invertColors: Bool
     public let syncTexSpots: [SyncTexSpot]
     public let syncTexTrigger: UUID
     public let zoomCommand: (id: UUID, command: PDFZoomCommand)?
+    public let actionRequest: (id: UUID, action: PDFAction)?
     public let initialZoomMode: PDFZoomMode
     public let initialScale: CGFloat?
     public let onZoomChange: ((CGFloat, PDFZoomMode) -> Void)?
     public let onInverseSync: (Int, Double, Double) -> Void
+    public let onPageChange: ((Int, Int) -> Void)?
+    public let onFindProgress: ((Int?, Int?) -> Void)?
 
     public init(
         document: PDFDocument?,
@@ -21,20 +31,26 @@ public struct NativePDFPreviewView: NSViewRepresentable {
         syncTexSpots: [SyncTexSpot],
         syncTexTrigger: UUID,
         zoomCommand: (id: UUID, command: PDFZoomCommand)? = nil,
+        actionRequest: (id: UUID, action: PDFAction)? = nil,
         initialZoomMode: PDFZoomMode = .fitWidth,
         initialScale: CGFloat? = nil,
         onZoomChange: ((CGFloat, PDFZoomMode) -> Void)? = nil,
-        onInverseSync: @escaping (Int, Double, Double) -> Void
+        onInverseSync: @escaping (Int, Double, Double) -> Void,
+        onPageChange: ((Int, Int) -> Void)? = nil,
+        onFindProgress: ((Int?, Int?) -> Void)? = nil
     ) {
         self.document = document
         self.invertColors = invertColors
         self.syncTexSpots = syncTexSpots
         self.syncTexTrigger = syncTexTrigger
         self.zoomCommand = zoomCommand
+        self.actionRequest = actionRequest
         self.initialZoomMode = initialZoomMode
         self.initialScale = initialScale
         self.onZoomChange = onZoomChange
         self.onInverseSync = onInverseSync
+        self.onPageChange = onPageChange
+        self.onFindProgress = onFindProgress
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -52,6 +68,8 @@ public struct NativePDFPreviewView: NSViewRepresentable {
         pdfView.backgroundColor = NSColor.underPageBackgroundColor
         pdfView.wantsLayer = true
         pdfView.onInverseSync = onInverseSync
+        pdfView.onPageChange = onPageChange
+        pdfView.onFindProgress = onFindProgress
         pdfView.delegate = context.coordinator
         // Set mode before the callback so the initial value isn't reported back.
         pdfView.pendingScale = initialZoomMode == .custom ? initialScale : nil
@@ -59,12 +77,15 @@ public struct NativePDFPreviewView: NSViewRepresentable {
         pdfView.onZoomChange = onZoomChange
         // A recreated view must not replay a command the VM already issued.
         context.coordinator.lastCommandID = zoomCommand?.id
+        context.coordinator.lastActionID = actionRequest?.id
         return pdfView
     }
 
     public func updateNSView(_ pdfView: SyncTexPDFView, context: Context) {
         pdfView.onInverseSync = onInverseSync
         pdfView.onZoomChange = onZoomChange
+        pdfView.onPageChange = onPageChange
+        pdfView.onFindProgress = onFindProgress
 
         if pdfView.document !== document {
             pdfView.replaceDocument(document)
@@ -83,6 +104,11 @@ public struct NativePDFPreviewView: NSViewRepresentable {
         if let cmd = zoomCommand, cmd.id != context.coordinator.lastCommandID {
             context.coordinator.lastCommandID = cmd.id
             pdfView.apply(cmd.command)
+        }
+
+        if let request = actionRequest, request.id != context.coordinator.lastActionID {
+            context.coordinator.lastActionID = request.id
+            pdfView.apply(request.action)
         }
     }
 
@@ -105,6 +131,7 @@ public struct NativePDFPreviewView: NSViewRepresentable {
         var lastInvert: Bool?
         var lastSyncTrigger: UUID?
         var lastCommandID: UUID?
+        var lastActionID: UUID?
     }
 }
 
@@ -122,6 +149,7 @@ public final class SyncTexPDFView: PDFView {
 
     var onInverseSync: ((Int, Double, Double) -> Void)?
     var onZoomChange: ((CGFloat, PDFZoomMode) -> Void)?
+    var onPageChange: ((Int, Int) -> Void)?
     var zoomMode: PDFZoomMode = .fitWidth {
         didSet { if oldValue != zoomMode { reportZoom() } }
     }
@@ -130,6 +158,11 @@ public final class SyncTexPDFView: PDFView {
     private var expectedScale: CGFloat = 0
     private var lastFitSize: NSSize = .zero
     private var scaleObserver: NSObjectProtocol?
+    private var pageObserver: NSObjectProtocol?
+    private var findSelections: [PDFSelection] = []
+    private var findQuery = ""
+    private var findIndex = 0
+    var onFindProgress: ((Int?, Int?) -> Void)?
     private var isRestoring = false
     /// Scale to use for the first document when the mode is .custom (recreated view).
     var pendingScale: CGFloat?
@@ -146,6 +179,7 @@ public final class SyncTexPDFView: PDFView {
 
     deinit {
         if let o = scaleObserver { NotificationCenter.default.removeObserver(o) }
+        if let o = pageObserver { NotificationCenter.default.removeObserver(o) }
     }
 
     private func setupObserver() {
@@ -160,6 +194,20 @@ public final class SyncTexPDFView: PDFView {
             }
             self.reportZoom()
         }
+        pageObserver = NotificationCenter.default.addObserver(
+            forName: .PDFViewPageChanged, object: self, queue: .main
+        ) { [weak self] _ in
+            self?.reportPage()
+        }
+    }
+
+    private func reportPage() {
+        guard let document, document.pageCount > 0 else {
+            onPageChange?(0, 0)
+            return
+        }
+        let index = currentPage.map { document.index(for: $0) + 1 } ?? 1
+        onPageChange?(index, document.pageCount)
     }
 
     private func reportZoom() {
@@ -179,6 +227,56 @@ public final class SyncTexPDFView: PDFView {
         case .actualSize:
             zoomMode = .actualSize
             setScale(1.0)
+        }
+    }
+
+    // MARK: Find, page navigation and printing
+
+    func apply(_ action: PDFAction) {
+        switch action {
+        case .print:
+            // Do not mutate the shared print info: the app may print other windows.
+            let info = (NSPrintInfo.shared.copy() as? NSPrintInfo) ?? NSPrintInfo.shared
+            info.horizontalPagination = .fit
+            info.verticalPagination = .fit
+            print(with: info, autoRotate: true, pageScaling: .pageScaleToFit)
+        case .clearFind:
+            findQuery = ""
+            findSelections = []
+            highlightedSelections = nil
+            onFindProgress?(nil, nil)
+        case .find(let query, let forward):
+            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, let document else {
+                findQuery = ""
+                findSelections = []
+                highlightedSelections = nil
+                onFindProgress?(nil, nil)
+                return
+            }
+            if trimmed != findQuery {
+                findQuery = trimmed
+                findSelections = document.findString(trimmed, withOptions: [.caseInsensitive])
+                findSelections.forEach { $0.color = NSColor.systemYellow.withAlphaComponent(0.45) }
+                highlightedSelections = findSelections
+                findIndex = 0
+            } else if !findSelections.isEmpty {
+                findIndex = (findIndex + (forward ? 1 : -1) + findSelections.count) % findSelections.count
+            }
+            guard findSelections.indices.contains(findIndex) else {
+                onFindProgress?(0, 0)
+                return
+            }
+            go(to: findSelections[findIndex])
+            reportPage()
+            onFindProgress?(findIndex + 1, findSelections.count)
+        case .goToPage(let page):
+            guard let document, document.pageCount > 0 else { return }
+            let index = min(max(0, page - 1), document.pageCount - 1)
+            if let target = document.page(at: index) {
+                go(to: PDFDestination(page: target, at: .zero))
+                reportPage()
+            }
         }
     }
 
@@ -224,9 +322,19 @@ public final class SyncTexPDFView: PDFView {
 
     public override func layout() {
         super.layout()
+        allowDiagonalScrolling()
         if (zoomMode == .fitWidth || zoomMode == .fitPage), bounds.size != lastFitSize {
             applyFit()
         }
+    }
+
+    /// AppKit snaps a trackpad gesture to its predominant axis by default. The
+    /// preview is a canvas: once the page is zoomed past the window, a diagonal
+    /// pan should move both axes at once.
+    private func allowDiagonalScrolling() {
+        guard let scrollView = documentView?.enclosingScrollView,
+              scrollView.usesPredominantAxisScrolling else { return }
+        scrollView.usesPredominantAxisScrolling = false
     }
 
     public override func scrollWheel(with event: NSEvent) {
@@ -264,7 +372,13 @@ public final class SyncTexPDFView: PDFView {
         pendingScale = nil
 
         isRestoring = true
+        findQuery = ""
+        findSelections = []
+        findIndex = 0
+        highlightedSelections = nil
+        onFindProgress?(nil, nil)
         document = newDoc
+        allowDiagonalScrolling()
         guard let doc = newDoc, doc.pageCount > 0 else { isRestoring = false; return }
 
         let restore = { [weak self] in
@@ -284,7 +398,9 @@ public final class SyncTexPDFView: PDFView {
         DispatchQueue.main.async { [weak self] in
             if self?.document === doc { restore() }
             self?.isRestoring = false
+            self?.reportPage()
         }
+        reportPage()
     }
 
     public override func mouseDown(with event: NSEvent) {

@@ -24,22 +24,23 @@ final class ProofTests: XCTestCase {
         XCTAssertEqual(items, ["a.md"])
     }
 
-    func testTreeFiltersAndDropsEmptyDirs() throws {
+    func testTreeFiltersAndKeepsEmptyDirs() throws {
         let dir = try makeTempDir("tree")
         defer { try? FileManager.default.removeItem(at: dir) }
 
         let fm = FileManager.default
         try fm.createDirectory(at: dir.appendingPathComponent("ch"), withIntermediateDirectories: true)
         try fm.createDirectory(at: dir.appendingPathComponent("empty"), withIntermediateDirectories: true)
-        try fm.createDirectory(at: dir.appendingPathComponent(".build"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: dir.appendingPathComponent(".proof"), withIntermediateDirectories: true)
 
-        for rel in ["main.tex", "notes.md", "ch/one.tex", ".build/main.tex"] {
+        for rel in ["main.tex", "notes.md", "ch/one.tex", ".proof/main.tex"] {
             try "".write(to: dir.appendingPathComponent(rel), atomically: true, encoding: .utf8)
         }
 
         let tree = FileService.listTree(root: dir.path, extensions: ["tex"])
-        XCTAssertEqual(tree.map(\.name), ["ch", "main.tex"])
+        XCTAssertEqual(tree.map(\.name), ["ch", "empty", "main.tex"])
         XCTAssertEqual(tree[0].children.map(\.name), ["one.tex"])
+        XCTAssertTrue(tree[1].children.isEmpty)
     }
 
     func testEngineMagicComment() {

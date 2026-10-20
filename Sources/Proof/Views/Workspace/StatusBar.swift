@@ -12,9 +12,12 @@ struct StatusBar: View {
                     Text("Ln \(viewModel.cursorLine), Col \(viewModel.cursorCol)")
                         .monospacedDigit()
                     if viewModel.mode != .mermaid {
-                        Text("\(viewModel.wordCount) word\(viewModel.wordCount == 1 ? "" : "s")")
+                        Text(wordsLabel)
                             .monospacedDigit()
                     }
+                    Text("\(viewModel.textFormat.encoding.displayName) · \(viewModel.textFormat.lineEnding.displayName)")
+                        .monospacedDigit()
+                        .help("Text encoding and line endings")
                 }
 
                 Spacer(minLength: 8)
@@ -38,6 +41,11 @@ struct StatusBar: View {
         }
     }
 
+    private var wordsLabel: String {
+        let count = viewModel.wordCount
+        return "\(count) word\(count == 1 ? "" : "s")"
+    }
+
     private var outcome: String? {
         guard viewModel.mode == .latex, !viewModel.isCompiling, let res = viewModel.compileResult, !res.cancelled else { return nil }
         if res.ok { return "Compiled successfully" }
@@ -49,6 +57,15 @@ struct StatusBar: View {
     private var trailing: some View {
         switch viewModel.mode {
         case .latex:
+            if !viewModel.isSnippetMode, let root = viewModel.rootTexPath {
+                Button {
+                    viewModel.revealMainFile()
+                } label: {
+                    Label((root as NSString).lastPathComponent, systemImage: "scope")
+                }
+                .buttonStyle(.plain)
+                .help("Open main file — \(viewModel.relativePath(root))")
+            }
             if viewModel.isCompiling {
                 HStack(spacing: 5) {
                     ProgressView().controlSize(.mini)

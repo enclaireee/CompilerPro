@@ -43,6 +43,13 @@ public enum WorkspaceMode: String, Codable, CaseIterable, Identifiable, Sendable
         Array(extensions.prefix(2))
     }
 
+    /// Files shown in the sidebar. Projects are more than their primary documents:
+    /// images, data files and build scripts belong in the tree too. Editing is still
+    /// restricted by `extensions`, so a LaTeX project cannot create a `.md` file.
+    public var browsableExtensions: [String] {
+        extensions + FileService.supportExtensions
+    }
+
     public var starterFile: (name: String, contents: String, initialLine: Int) {
         switch self {
         case .latex:

@@ -256,13 +256,13 @@ public final class AppState: ObservableObject {
         openExternalPath(url.path)
     }
 
-    /// Modes whose files appear in `folder` (shallow plus one level, skipping hidden and .build).
+    /// Modes whose files appear in `folder` (shallow plus one level, skipping hidden folders).
     private func detectModes(in folder: String) -> [WorkspaceMode] {
         let fm = FileManager.default
         var found = Set<WorkspaceMode>()
         func scan(_ dir: String, depth: Int) {
             guard let names = try? fm.contentsOfDirectory(atPath: dir) else { return }
-            for name in names where !name.hasPrefix(".") && name != ".build" {
+            for name in names where !name.hasPrefix(".") {
                 let path = (dir as NSString).appendingPathComponent(name)
                 var isDir: ObjCBool = false
                 guard fm.fileExists(atPath: path, isDirectory: &isDir) else { continue }

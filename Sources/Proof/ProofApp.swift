@@ -102,7 +102,16 @@ private struct AppCommands: Commands {
                 .keyboardShortcut("w", modifiers: .command)
         }
 
+        CommandGroup(replacing: .printItem) {
+            Button("Print…") { workspace?.printPDF() }
+                .keyboardShortcut("p", modifiers: .command)
+                .disabled(workspace?.canPrintPDF != true)
+        }
+
         CommandGroup(after: .sidebar) {
+            Button("Go to Line…") { workspace?.presentGoToLine() }
+                .keyboardShortcut("l", modifiers: .command)
+                .disabled(workspace?.currentFile == nil)
             Divider()
             Button(workspace?.isProblemsVisible == true ? "Hide Problems" : "Show Problems") {
                 workspace?.toggleProblems()
@@ -141,9 +150,23 @@ private struct AppCommands: Commands {
                 .keyboardShortcut(".", modifiers: .command)
                 .disabled(!isLatex || workspace?.isCompiling != true)
             Divider()
+            Button("Set as Main File") {
+                if let file = workspace?.currentFile { workspace?.setAsMainFile(file) }
+            }
+            .disabled(!isLatex || workspace?.currentFile == nil)
             Button("Show in PDF") { workspace?.syncForward() }
                 .keyboardShortcut("j", modifiers: [.command, .option])
                 .disabled(!isLatex)
+            Divider()
+            Button("Find in PDF") { workspace?.togglePDFSearch() }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .disabled(!isLatex || workspace?.pdfDocument == nil)
+            Button("Find Next in PDF") { workspace?.findInPDF(forward: true) }
+                .keyboardShortcut("g", modifiers: [.command, .option])
+                .disabled(!isLatex || workspace?.pdfDocument == nil)
+            Button("Find Previous in PDF") { workspace?.findInPDF(forward: false) }
+                .keyboardShortcut("g", modifiers: [.command, .option, .shift])
+                .disabled(!isLatex || workspace?.pdfDocument == nil)
             Divider()
             Button("Next Problem") { workspace?.nextProblem() }
                 .keyboardShortcut("'", modifiers: .command)

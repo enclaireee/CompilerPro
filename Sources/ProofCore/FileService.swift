@@ -2,8 +2,32 @@ import Foundation
 
 public enum FileService {
     private static let skippedDirectories: Set<String> = [
-        "node_modules", "target", "dist", "build", ".build", ".git"
+        "node_modules", "target", "dist", "build", ".build", ".proof", ".git"
     ]
+
+    /// Extra files that are useful to see (and sometimes edit) inside a project, beyond
+    /// the mode's own document types.
+    public static let textExtensions: Set<String> = [
+        "txt", "csv", "tsv", "json", "yaml", "yml", "toml", "xml", "plist",
+        "cfg", "def", "bst", "bbx", "cbx", "lua", "sh", "py", "html", "htm", "css",
+        "js", "svg", "bibtex", "ris"
+    ]
+    public static let imageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "webp", "heic", "tif", "tiff", "bmp", "eps", "pdf"
+    ]
+    public static var supportExtensions: [String] {
+        Array(textExtensions.union(imageExtensions)).sorted()
+    }
+
+    /// Whether Proof can open this file in the text editor (as opposed to Quick Look).
+    public static func isTextPath(_ path: String) -> Bool {
+        let ext = (path as NSString).pathExtension.lowercased()
+        return textExtensions.contains(ext) || WorkspaceMode.allCases.contains { $0.extensions.contains(ext) }
+    }
+
+    public static func isImagePath(_ path: String) -> Bool {
+        imageExtensions.contains((path as NSString).pathExtension.lowercased())
+    }
 
     /// Crash-safe atomic save: writes to a temporary sibling file, fsyncs, preserves POSIX permissions, and renames over the target.
     public static func atomicWrite(path: String, data: Data) throws {
@@ -48,7 +72,14 @@ public enum FileService {
         try atomicWrite(path: path, data: data)
     }
 
-    /// Recursively walks `root` up to `maxDepth`, filtering to files matching `extensions` and dropping empty directories.
+    /// Atomic save that writes the buffer back in the format it was opened with.
+    public static func atomicWriteText(path: String, contents: String, format: TextFormat) throws {
+        let data = try TextFile.encode(text: contents, format: format, path: path)
+        try atomicWrite(path: path, data: data)
+    }
+
+    /// Recursively walks `root` up to `maxDepth`, filtering files to `extensions`. Folders are
+    /// always kept, even empty ones, so a newly created folder is visible immediately.
     public static func listTree(root: String, extensions: [String], maxDepth: Int = 6) -> [FileEntry] {
         let extSet = Set(extensions.map { $0.lowercased() })
         let rootURL = URL(fileURLWithPath: root)
@@ -85,9 +116,9 @@ public enum FileService {
 
             if values?.isDirectory == true {
                 let children = depth < maxDepth ? walk(dir: url, realRoot: realRoot, extSet: extSet, depth: depth + 1, maxDepth: maxDepth) : []
-                if !children.isEmpty {
-                    entries.append(FileEntry(name: name, path: url.path, isDirectory: true, children: children))
-                }
+                // Keep empty folders: a user who just made one should see it, and it is
+                // where the next New File will go.
+                entries.append(FileEntry(name: name, path: url.path, isDirectory: true, children: children))
             } else {
                 let ext = url.pathExtension.lowercased()
                 if extSet.contains(ext) {

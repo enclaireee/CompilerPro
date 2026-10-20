@@ -5,65 +5,88 @@ import WebKit
 
 // MARK: - Bundled Offline Web Assets (KaTeX, Mermaid 12, markdown-it)
 
-@MainActor
-private enum BundledWebAssets {
+/// Serves the bundled JS/CSS/fonts to the previews through a private URL scheme.
+/// Previously the KaTeX CSS had every font inlined as base64 (~400 KB of string
+/// building per page) and Mermaid's 5.2 MB bundle was parsed for every Markdown
+/// document even when it contained no diagram. Linking to files lets WebKit cache
+/// them and keeps the Swift side from building huge strings.
+final class WebAssetSchemeHandler: NSObject, WKURLSchemeHandler {
+    static let scheme = "proof-asset"
+    private let root: URL?
+
+    init(root: URL?) {
+        self.root = root
+    }
+
+    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
+        guard let url = urlSchemeTask.request.url,
+              let root,
+              url.scheme == Self.scheme else {
+            urlSchemeTask.didFailWithError(URLError(.badURL))
+            return
+        }
+        let relative = url.path.hasPrefix("/") ? String(url.path.dropFirst()) : url.path
+        let file = root.appendingPathComponent(relative).standardizedFileURL
+        let rootPath = root.standardizedFileURL.path
+        guard file.path.hasPrefix(rootPath + "/"), !relative.contains("..") else {
+            urlSchemeTask.didFailWithError(URLError(.noPermissionsToReadFile))
+            return
+        }
+        guard let data = try? Data(contentsOf: file) else {
+            urlSchemeTask.didFailWithError(URLError(.fileDoesNotExist))
+            return
+        }
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: 200,
+            httpVersion: "HTTP/1.1",
+            headerFields: [
+                "Content-Type": Self.mimeType(for: file.pathExtension),
+                "Content-Length": String(data.count),
+                // Fonts are loaded cross-origin by the Markdown page (whose base URL is
+                // the document folder), so the asset scheme must allow CORS.
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "max-age=86400"
+            ]
+        ) ?? URLResponse(url: url, mimeType: Self.mimeType(for: file.pathExtension),
+                         expectedContentLength: data.count, textEncodingName: nil)
+        urlSchemeTask.didReceive(response)
+        urlSchemeTask.didReceive(data)
+        urlSchemeTask.didFinish()
+    }
+
+    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {}
+
+    static func mimeType(for extensionName: String) -> String {
+        switch extensionName.lowercased() {
+        case "js": return "text/javascript"
+        case "css": return "text/css"
+        case "woff2": return "font/woff2"
+        case "woff": return "font/woff"
+        case "ttf": return "font/ttf"
+        case "svg": return "image/svg+xml"
+        case "png": return "image/png"
+        case "json": return "application/json"
+        default: return "application/octet-stream"
+        }
+    }
+}
+
+enum BundledWebAssets {
     static let resourcesURL: URL? = {
         Bundle.module.resourceURL?.appendingPathComponent("Resources", isDirectory: true)
     }()
 
-    static let katexJS: String = loadResource("katex.min.js")
-    static let mermaidJS: String = loadResource("mermaid.min.js")
-    static let markdownItJS: String = loadResource("markdown-it.umd.min.js")
+    static let baseURL = URL(string: "\(WebAssetSchemeHandler.scheme)://bundle/")!
 
-    static let katexCSSWithEmbeddedFonts: String = {
-        var css = loadResource("katex.min.css")
-        guard let fontsDir = resourcesURL?.appendingPathComponent("fonts", isDirectory: true) else {
-            return css
-        }
-        // Remove legacy .woff and .ttf fallbacks and inline .woff2 as base64 data URIs so fonts work in any WKWebView context
-        css = css.replacingOccurrences(
-            of: #",url\(fonts/[^)]+\.woff\) format\("woff"\),url\(fonts/[^)]+\.ttf\) format\("truetype"\)"#,
-            with: "",
-            options: .regularExpression
-        )
-        let pattern = #"url\(fonts/([^)]+\.woff2)\)"#
-        if let regex = try? NSRegularExpression(pattern: pattern) {
-            let nsRange = NSRange(css.startIndex..<css.endIndex, in: css)
-            let matches = regex.matches(in: css, range: nsRange).reversed()
-            for match in matches {
-                guard match.numberOfRanges >= 2,
-                      let fileRange = Range(match.range(at: 1), in: css),
-                      let fullRange = Range(match.range(at: 0), in: css) else { continue }
-                let fileName = String(css[fileRange])
-                let fileURL = fontsDir.appendingPathComponent(fileName)
-                if let data = try? Data(contentsOf: fileURL) {
-                    let b64 = data.base64EncodedString()
-                    css.replaceSubrange(fullRange, with: "url(data:font/woff2;base64,\(b64))")
-                }
-            }
-        }
-        return css
-    }()
-
-    static let katexUserScript: WKUserScript = {
-        WKUserScript(source: katexJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
-    }()
-
-    static let mermaidUserScript: WKUserScript = {
-        WKUserScript(source: mermaidJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
-    }()
-
-    static let markdownItUserScript: WKUserScript = {
-        WKUserScript(source: markdownItJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
-    }()
-
-    private static func loadResource(_ name: String) -> String {
-        guard let url = resourcesURL?.appendingPathComponent(name),
-              let content = try? String(contentsOf: url, encoding: .utf8) else {
-            return ""
-        }
-        return content
+    static func url(_ name: String) -> String {
+        baseURL.appendingPathComponent(name).absoluteString
     }
+
+    static var katexCSSURL: String { url("katex.min.css") }
+    static var katexJSURL: String { url("katex.min.js") }
+    static var markdownItURL: String { url("markdown-it.umd.min.js") }
+    static var mermaidURL: String { url("mermaid.min.js") }
 }
 
 // MARK: - Shared hardened WKWebView plumbing
@@ -89,11 +112,13 @@ class WebPreviewCoordinator: NSObject, WKNavigationDelegate {
     weak var webView: WKWebView?
     private(set) var isLoaded = false
     private var allowsNextLoad = false
+    fileprivate var allowsEval = false
 
-    func makeWebView(userScripts: [WKUserScript], messageHandlerName: String? = nil) -> WKWebView {
+    func makeWebView(messageHandlerName: String? = nil, allowEval: Bool = false) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
-        userScripts.forEach(config.userContentController.addUserScript)
+        config.setURLSchemeHandler(WebAssetSchemeHandler(root: BundledWebAssets.resourcesURL),
+                                  forURLScheme: WebAssetSchemeHandler.scheme)
         if let messageHandlerName, let handler = self as? WKScriptMessageHandler {
             config.userContentController.add(WeakScriptMessageProxy(handler), name: messageHandlerName)
         }
@@ -101,6 +126,7 @@ class WebPreviewCoordinator: NSObject, WKNavigationDelegate {
         webView.setValue(false, forKey: "drawsBackground")
         webView.navigationDelegate = self
         self.webView = webView
+        self.allowsEval = allowEval
         return webView
     }
 
@@ -123,10 +149,13 @@ class WebPreviewCoordinator: NSObject, WKNavigationDelegate {
     /// Called for a user-activated link that reached WebKit's navigation (the navigation itself is always cancelled).
     func linkActivated(_ url: URL) {}
 
-    /// CSP for every host page: only our nonce-tagged inline script runs, so injected inline
-    /// handlers, javascript: URLs, frames, objects and forms are refused even if markup slips through.
-    static func contentSecurityPolicyMeta(nonce: String) -> String {
-        "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'nonce-\(nonce)' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob: file:; media-src data: blob: file:; font-src data:; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'\">"
+    /// CSP for every host page: only our nonce-tagged inline script and the bundled
+    /// `proof-asset:` files may run, so injected inline handlers, javascript: URLs,
+    /// frames, objects and forms are refused even if markup slips through.
+    /// `'unsafe-eval'` is granted only to the pages that run Mermaid.
+    static func contentSecurityPolicyMeta(nonce: String, allowEval: Bool = false) -> String {
+        let eval = allowEval ? " 'unsafe-eval'" : ""
+        return "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'nonce-\(nonce)' proof-asset:\(eval); style-src 'unsafe-inline' proof-asset:; img-src data: blob: file: proof-asset:; media-src data: blob: file: proof-asset:; font-src data: proof-asset:; frame-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'\">"
     }
 
     func webView(
@@ -190,7 +219,7 @@ private struct LatexSnippetWebCanvas: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> WKWebView {
-        let webView = context.coordinator.makeWebView(userScripts: [BundledWebAssets.katexUserScript])
+        let webView = context.coordinator.makeWebView()
         context.coordinator.pendingBlocks = blocks
         context.coordinator.loadInitialHTML()
         return webView
@@ -215,9 +244,10 @@ private struct LatexSnippetWebCanvas: NSViewRepresentable {
             <html>
             <head>
             <meta charset="utf-8">
-            \#(Self.contentSecurityPolicyMeta(nonce: nonce))
+            \#(WebPreviewCoordinator.contentSecurityPolicyMeta(nonce: nonce))
+            <link rel="stylesheet" href="\#(BundledWebAssets.katexCSSURL)">
+            <script src="\#(BundledWebAssets.katexJSURL)"></script>
             <style>
-              \#(BundledWebAssets.katexCSSWithEmbeddedFonts)
               :root { color-scheme: light dark; }
               body {
                 margin: 0; padding: 24px;
@@ -382,7 +412,7 @@ struct MermaidWebCanvas: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let coordinator = context.coordinator
-        let webView = coordinator.makeWebView(userScripts: [BundledWebAssets.mermaidUserScript], messageHandlerName: "mermaidBridge")
+        let webView = coordinator.makeWebView(messageHandlerName: "mermaidBridge", allowEval: true)
         // A request issued before this canvas existed (e.g. while the diagram was empty) is not replayed.
         coordinator.lastExportID = exportRequest?.id
         coordinator.loadInitialHTML()
@@ -518,7 +548,8 @@ struct MermaidWebCanvas: NSViewRepresentable {
             <html>
             <head>
             <meta charset="utf-8">
-            \#(contentSecurityPolicyMeta(nonce: nonce))
+            \#(WebPreviewCoordinator.contentSecurityPolicyMeta(nonce: nonce, allowEval: true))
+            <script src="\#(BundledWebAssets.mermaidURL)"></script>
             <style>
               :root { color-scheme: light dark; }
               html, body {
@@ -735,6 +766,9 @@ public struct MarkdownPreviewView: View {
     public let workspaceRoot: String?
     public let allowedExtensions: [String]
     public let onOpenRelativeMarkdown: (String) -> Void
+    public let exportRequest: (id: UUID, destPath: String)?
+    public let onExportCompleted: (String, Bool) -> Void
+    public let onToggleTask: (Int, Bool) -> Void
 
     /// - Parameters:
     ///   - workspaceRoot: links may only open files inside this folder; defaults to `baseDirectory`.
@@ -746,6 +780,9 @@ public struct MarkdownPreviewView: View {
         topLine: Int,
         workspaceRoot: String? = nil,
         allowedExtensions: [String] = WorkspaceMode.markdown.extensions,
+        exportRequest: (id: UUID, destPath: String)? = nil,
+        onExportCompleted: @escaping (String, Bool) -> Void = { _, _ in },
+        onToggleTask: @escaping (Int, Bool) -> Void = { _, _ in },
         onOpenRelativeMarkdown: @escaping (String) -> Void
     ) {
         self.markdownText = markdownText
@@ -753,6 +790,9 @@ public struct MarkdownPreviewView: View {
         self.topLine = topLine
         self.workspaceRoot = workspaceRoot
         self.allowedExtensions = allowedExtensions
+        self.exportRequest = exportRequest
+        self.onExportCompleted = onExportCompleted
+        self.onToggleTask = onToggleTask
         self.onOpenRelativeMarkdown = onOpenRelativeMarkdown
     }
 
@@ -763,6 +803,9 @@ public struct MarkdownPreviewView: View {
             topLine: topLine,
             workspaceRoot: workspaceRoot ?? baseDirectory,
             allowedExtensions: allowedExtensions,
+            exportRequest: exportRequest,
+            onExportCompleted: onExportCompleted,
+            onToggleTask: onToggleTask,
             onOpenRelativeMarkdown: onOpenRelativeMarkdown
         )
     }
@@ -774,6 +817,9 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
     let topLine: Int
     let workspaceRoot: String
     let allowedExtensions: [String]
+    let exportRequest: (id: UUID, destPath: String)?
+    let onExportCompleted: (String, Bool) -> Void
+    let onToggleTask: (Int, Bool) -> Void
     let onOpenRelativeMarkdown: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -782,9 +828,10 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let webView = context.coordinator.makeWebView(
-            userScripts: [BundledWebAssets.markdownItUserScript, BundledWebAssets.katexUserScript, BundledWebAssets.mermaidUserScript],
-            messageHandlerName: "mdBridge"
+            messageHandlerName: "mdBridge",
+            allowEval: true
         )
+        context.coordinator.lastExportID = exportRequest?.id
         context.coordinator.loadPage()
         return webView
     }
@@ -792,6 +839,10 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.parent = self
         context.coordinator.update()
+        if let req = exportRequest, req.id != context.coordinator.lastExportID {
+            context.coordinator.lastExportID = req.id
+            context.coordinator.performExport(req)
+        }
     }
 
     static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
@@ -805,6 +856,8 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
         private var lastMarkdown = ""
         private var lastTopLine = 1
         private var debounceWork: DispatchWorkItem?
+        var lastExportID: UUID?
+        private var queuedExport: (id: UUID, destPath: String)?
 
         init(_ parent: MarkdownWebCanvas) {
             self.parent = parent
@@ -825,6 +878,41 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
             lastTopLine = parent.topLine
             renderNow(markdown: lastMarkdown)
             scrollToLineNow(lastTopLine)
+            if let queuedExport {
+                self.queuedExport = nil
+                performExport(queuedExport)
+            }
+        }
+
+        func performExport(_ request: (id: UUID, destPath: String)) {
+            guard isLoaded, let webView else {
+                queuedExport = request
+                return
+            }
+            // Render the current buffer, not the last debounced preview, and wait for the
+            // render to finish before printing the page.
+            debounceWork?.cancel()
+            lastMarkdown = parent.markdownText
+            renderNow(markdown: lastMarkdown) { [weak self] in
+                self?.createPDF(for: request, from: webView)
+            }
+        }
+
+        private func createPDF(for request: (id: UUID, destPath: String), from webView: WKWebView) {
+            webView.createPDF(configuration: WKPDFConfiguration()) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .failure(let error):
+                    self.parent.onExportCompleted("Export failed: \(error.localizedDescription)", true)
+                case .success(let data):
+                    do {
+                        try FileService.atomicWrite(path: request.destPath, data: data)
+                        self.parent.onExportCompleted("Exported \((request.destPath as NSString).lastPathComponent)", false)
+                    } catch {
+                        self.parent.onExportCompleted("Export failed: \(error.localizedDescription)", true)
+                    }
+                }
+            }
         }
 
         func update() {
@@ -849,11 +937,16 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
             }
         }
 
-        private func renderNow(markdown: String) {
+        private func renderNow(markdown: String, completion: (() -> Void)? = nil) {
             guard let webView,
                   let data = try? JSONEncoder().encode(markdown),
-                  let json = String(data: data, encoding: .utf8) else { return }
-            webView.evaluateJavaScript("window.renderMarkdown(\(json));", completionHandler: nil)
+                  let json = String(data: data, encoding: .utf8) else {
+                completion?()
+                return
+            }
+            webView.evaluateJavaScript("window.renderMarkdown(\(json));") { _, _ in
+                completion?()
+            }
         }
 
         private func scrollToLineNow(_ line: Int) {
@@ -884,6 +977,8 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
                 follow(link: rel)
             } else if let ext = dict["openExternal"] as? String, let url = LinkPolicy.externalURL(ext) {
                 NSWorkspace.shared.open(url)
+            } else if let line = dict["toggleTask"] as? Int, let checked = dict["checked"] as? Bool {
+                parent.onToggleTask(line, checked)
             }
         }
 
@@ -893,9 +988,11 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
             <html>
             <head>
             <meta charset="utf-8">
-            \#(contentSecurityPolicyMeta(nonce: nonce))
+            \#(WebPreviewCoordinator.contentSecurityPolicyMeta(nonce: nonce, allowEval: true))
+            <link rel="stylesheet" href="\#(BundledWebAssets.katexCSSURL)">
+            <script src="\#(BundledWebAssets.markdownItURL)"></script>
+            <script src="\#(BundledWebAssets.katexJSURL)"></script>
             <style>
-              \#(BundledWebAssets.katexCSSWithEmbeddedFonts)
               :root {
                 color-scheme: light dark;
                 --fg: #1d1d1f;
@@ -996,6 +1093,13 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
               const container = document.getElementById("container");
               const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
               const bridge = (msg) => window.webkit?.messageHandlers?.mdBridge?.postMessage(msg);
+              // Task checkboxes edit the Markdown source, not just the preview.
+              container.addEventListener("change", (event) => {
+                const input = event.target;
+                if (!input || input.type !== "checkbox" || !input.dataset.taskLine) return;
+                const line = parseInt(input.dataset.taskLine, 10);
+                if (line > 0) bridge({ toggleTask: line, checked: !!input.checked });
+              });
               let md = null, renderSeq = 0, mmdSeq = 0, lastRaw = "";
               // theme + "\n" + diagram source -> rendered SVG markup (or a Promise while rendering).
               const mermaidCache = new Map();
@@ -1020,7 +1124,7 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
                   }
                   return defaultFence(tokens, idx, options, env, self);
                 };
-                ["paragraph_open", "heading_open", "blockquote_open", "bullet_list_open", "ordered_list_open", "table_open", "hr"].forEach(rule => {
+                ["paragraph_open", "heading_open", "blockquote_open", "bullet_list_open", "ordered_list_open", "list_item_open", "table_open", "hr"].forEach(rule => {
                   const orig = md.renderer.rules[rule] || function(tokens, idx, options, env, self) {
                     return self.renderToken(tokens, idx, options);
                   };
@@ -1091,9 +1195,18 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
                 const math = [];
                 const src = window.katex ? extractMath(raw, math) : raw;
                 const parser = ensureMarkdownIt();
-                const html = (parser ? parser.render(src) : `<pre>${esc(src)}</pre>`)
-                  .replace(/<li>\s*\[ \]\s*/g, '<li class="task"><input type="checkbox" disabled> ')
-                  .replace(/<li>\s*\[[xX]\]\s*/g, '<li class="task"><input type="checkbox" checked disabled> ');
+                const rendered = parser ? parser.render(src) : `<pre>${esc(src)}</pre>`;
+                // Task lists: keep the list item's source line so clicking the box can
+                // rewrite `[ ]` / `[x]` in the editor with full undo support.
+                const lineOf = (attrs) => {
+                  const m = /data-line="(\d+)"/.exec(attrs || "");
+                  return m ? m[1] : "0";
+                };
+                const html = rendered
+                  .replace(/<li([^>]*)>\s*\[ \]\s*/g, (m, attrs) =>
+                    `<li class="task"${attrs}><input type="checkbox" data-task-line="${lineOf(attrs)}"> `)
+                  .replace(/<li([^>]*)>\s*\[[xX]\]\s*/g, (m, attrs) =>
+                    `<li class="task"${attrs}><input type="checkbox" data-task-line="${lineOf(attrs)}" checked> `);
                 return html.replace(/\uE000M(\d+)\uE001/g, (_, i) => math[Number(i)] ?? "");
               }
 
@@ -1123,7 +1236,9 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
                 return doc.body;
               }
 
-              // ---- Mermaid blocks: cached by theme + source, so only changed diagrams re-render.
+              // ---- Mermaid blocks: loaded and cached on demand. A Markdown note without
+              // diagrams never pays for the 5 MB Mermaid bundle.
+              let mermaidLoader = null;
               function initMermaid() {
                 if (!window.mermaid) return;
                 window.mermaid.initialize({
@@ -1132,7 +1247,41 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
                   theme: darkQuery.matches ? "dark" : "default"
                 });
               }
-              initMermaid();
+
+              function loadMermaid() {
+                if (window.mermaid) return Promise.resolve(window.mermaid);
+                if (!mermaidLoader) {
+                  mermaidLoader = new Promise((resolve, reject) => {
+                    const script = document.createElement("script");
+                    script.src = "proof-asset://bundle/mermaid.min.js";
+                    script.onload = () => { initMermaid(); resolve(window.mermaid); };
+                    script.onerror = () => { mermaidLoader = null; reject(new Error("Mermaid could not be loaded")); };
+                    document.head.appendChild(script);
+                  });
+                }
+                return mermaidLoader;
+              }
+
+              function mermaidSource(node) {
+                try { return decodeURIComponent(node.getAttribute("data-mermaid") || "").trim(); } catch (e) { return ""; }
+              }
+
+              function mermaidTheme() { return darkQuery.matches ? "dark" : "default"; }
+
+              function cachedMermaid(code) {
+                const value = mermaidCache.get(mermaidTheme() + "\n" + code);
+                return typeof value === "string" ? value : null;
+              }
+
+              // Fill cached diagrams before diffing so unchanged blocks stay untouched.
+              function seedMermaidCaches(root) {
+                root.querySelectorAll(".md-mermaid[data-mermaid]").forEach((node) => {
+                  const code = mermaidSource(node);
+                  if (!code) return;
+                  const svg = cachedMermaid(code);
+                  if (svg) { node.innerHTML = svg; node.dataset.rendered = "1"; }
+                });
+              }
 
               function renderMermaidSource(code) {
                 return window.mermaid.render("md-mmd-" + (++mmdSeq), code).then(
@@ -1141,52 +1290,91 @@ private struct MarkdownWebCanvas: NSViewRepresentable {
                 );
               }
 
-              function hydrateMermaid(seq, previous) {
-                if (!window.mermaid) return;
-                const theme = darkQuery.matches ? "dark" : "default";
-                const used = new Set();
-                container.querySelectorAll(".md-mermaid[data-mermaid]").forEach((node, i) => {
-                  let code = "";
-                  try { code = decodeURIComponent(node.getAttribute("data-mermaid") || "").trim(); } catch (e) {}
-                  if (!code) return;
-                  const key = theme + "\n" + code;
-                  used.add(key);
-                  let cached = mermaidCache.get(key);
-                  if (typeof cached === "string") { node.innerHTML = cached; return; }
-                  // Keep showing the previous diagram at this position (dimmed) while the new one renders.
-                  if (previous[i]) { node.innerHTML = previous[i]; node.classList.add("stale"); }
-                  if (!cached) {
-                    cached = renderMermaidSource(code).then((svg) => {
-                      if (mermaidCache.get(key) === cached) mermaidCache.set(key, svg);
-                      return svg;
+              function hydrateMermaid(seq) {
+                const nodes = Array.from(container.querySelectorAll(".md-mermaid[data-mermaid]"))
+                  .filter((node) => !node.dataset.rendered && mermaidSource(node));
+                if (!nodes.length) return;
+                loadMermaid().then(() => {
+                  const used = new Set();
+                  nodes.forEach((node) => {
+                    if (seq !== renderSeq || !node.isConnected) return;
+                    const code = mermaidSource(node);
+                    const key = mermaidTheme() + "\n" + code;
+                    used.add(key);
+                    let cached = mermaidCache.get(key);
+                    if (typeof cached === "string") {
+                      node.innerHTML = cached;
+                      node.dataset.rendered = "1";
+                      return;
+                    }
+                    node.classList.add("stale");
+                    if (!cached) {
+                      cached = renderMermaidSource(code).then((svg) => {
+                        if (mermaidCache.get(key) === cached) mermaidCache.set(key, svg);
+                        return svg;
+                      });
+                      mermaidCache.set(key, cached);
+                    }
+                    cached.then((svg) => {
+                      if (seq !== renderSeq || !node.isConnected) return;
+                      node.innerHTML = svg;
+                      node.classList.remove("stale");
+                      node.dataset.rendered = "1";
                     });
-                    mermaidCache.set(key, cached);
+                  });
+                  for (const key of Array.from(mermaidCache.keys())) {
+                    if (!used.has(key) && typeof mermaidCache.get(key) === "string") mermaidCache.delete(key);
                   }
-                  cached.then((svg) => {
-                    if (seq !== renderSeq) return; // a newer render owns the DOM now
-                    node.innerHTML = svg;
-                    node.classList.remove("stale");
+                }).catch((err) => {
+                  nodes.forEach((node) => {
+                    node.innerHTML = `<pre class="md-mermaid-error">${esc(err && err.message ? err.message : err)}</pre>`;
                   });
                 });
-                for (const key of Array.from(mermaidCache.keys())) {
-                  if (!used.has(key)) mermaidCache.delete(key);
+              }
+
+              // ---- Block-level diff. Replacing the whole container on every keystroke
+              // re-laid-out the document, reloaded images and made the preview jump.
+              function reconcile(newBody) {
+                const oldNodes = Array.from(container.childNodes);
+                const newNodes = Array.from(newBody.childNodes);
+                let start = 0;
+                while (start < oldNodes.length && start < newNodes.length && oldNodes[start].isEqualNode(newNodes[start])) {
+                  start += 1;
                 }
+                let oldEnd = oldNodes.length, newEnd = newNodes.length;
+                while (oldEnd > start && newEnd > start && oldNodes[oldEnd - 1].isEqualNode(newNodes[newEnd - 1])) {
+                  oldEnd -= 1;
+                  newEnd -= 1;
+                }
+                if (start === oldEnd && start === newEnd) return false;
+                for (let i = start; i < oldEnd; i += 1) oldNodes[i].remove();
+                const anchor = oldEnd < oldNodes.length ? oldNodes[oldEnd] : null;
+                for (let i = start; i < newEnd; i += 1) container.insertBefore(newNodes[i], anchor);
+                return true;
+              }
+
+              function renderDocument() {
+                const body = sanitize(buildHTML(lastRaw));
+                seedMermaidCaches(body);
+                const scrollY = window.scrollY;
+                reconcile(body);
+                // Hydrate even when the block diff was empty: an in-flight render from the
+                // previous sequence was discarded and its node still needs filling.
+                hydrateMermaid(renderSeq);
+                // Keep the reading position when blocks above the viewport changed size.
+                window.scrollTo(0, scrollY);
               }
 
               window.renderMarkdown = (raw) => {
                 lastRaw = raw || "";
-                const seq = ++renderSeq;
-                const body = sanitize(buildHTML(lastRaw));
-                const previous = Array.from(container.querySelectorAll(".md-mermaid[data-mermaid]"), (n) => n.innerHTML);
-                const scrollY = window.scrollY;
-                container.replaceChildren(...body.childNodes);
-                hydrateMermaid(seq, previous);
-                window.scrollTo(0, scrollY);
+                renderSeq += 1;
+                renderDocument();
               };
 
               darkQuery.addEventListener("change", () => {
+                mermaidCache.clear();
                 initMermaid();
-                window.renderMarkdown(lastRaw);
+                if (lastRaw) window.renderMarkdown(lastRaw);
               });
 
               window.syncScrollToLine = (line) => {

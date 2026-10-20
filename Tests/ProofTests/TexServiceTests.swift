@@ -223,8 +223,8 @@ final class TexServiceTests: XCTestCase {
         let proj = dir.appendingPathComponent("proj")
         try FileManager.default.createDirectory(at: proj, withIntermediateDirectories: true)
         let root = proj.appendingPathComponent("main.tex").path
-        XCTAssertNoThrow(try TexProcessRunner.cleanBuild(root: root))  // no .build: no-op
-        try FileManager.default.createSymbolicLink(atPath: proj.appendingPathComponent(".build").path, withDestinationPath: victim.path)
+        XCTAssertNoThrow(try TexProcessRunner.cleanBuild(root: root))  // no .proof: no-op
+        try FileManager.default.createSymbolicLink(atPath: proj.appendingPathComponent(".proof").path, withDestinationPath: victim.path)
         XCTAssertThrowsError(try TexProcessRunner.cleanBuild(root: root))
         XCTAssertTrue(FileManager.default.fileExists(atPath: victim.path))
     }
@@ -331,7 +331,7 @@ final class TexServiceTests: XCTestCase {
         let view = """
         This is SyncTeX command line utility, version 1.5
         SyncTeX result begin
-        Output:/Users/a/My Docs/.build/main.pdf
+        Output:/Users/a/My Docs/.proof/main.pdf
         Page:2
         x:100.0
         y:200.0
@@ -346,7 +346,7 @@ final class TexServiceTests: XCTestCase {
         XCTAssertEqual(TexService.parseSynctexView(view), [SyncTexSpot(page: 2, x: 72.5, y: 140, w: 300, h: 10)])
         XCTAssertEqual(TexService.parseSynctexView("not synctex at all"), [])
 
-        let pdf = "/Users/a/My Docs/.build/main.pdf"
+        let pdf = "/Users/a/My Docs/.proof/main.pdf"
         let rel = "SyncTeX result begin\nOutput:main.pdf\nInput:./ch 1.tex\nLine:42\nColumn:-1\nSyncTeX result end\n"
         XCTAssertEqual(TexService.parseSynctexEdit(rel, pdf: pdf), SourceLocation(file: "/Users/a/My Docs/ch 1.tex", line: 42))
         let abs = "Input:/Users/a/My Docs/./sub/x.tex\nLine:3\n"

@@ -4,17 +4,42 @@ import SwiftUI
 
 struct ProblemsInspector: View {
     @ObservedObject var viewModel: WorkspaceViewModel
+    var onClose: (() -> Void)? = nil
+    @State private var logFilter = ""
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("View", selection: $viewModel.problemsTab) {
-                ForEach(WorkspaceViewModel.ProblemsTab.allCases, id: \.self) { tab in
-                    Text(tab.rawValue).tag(tab)
+            HStack(spacing: 8) {
+                Picker("View", selection: $viewModel.problemsTab) {
+                    ForEach(WorkspaceViewModel.ProblemsTab.allCases, id: \.self) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+
+                Spacer(minLength: 0)
+
+                Button {
+                    viewModel.compileOrStop()
+                } label: {
+                    Label(viewModel.isCompiling ? "Stop" : "Build", systemImage: viewModel.isCompiling ? "stop.fill" : "play.fill")
+                }
+                .buttonStyle(.borderless)
+                .help(viewModel.isCompiling ? "Stop (⌘.)" : "Compile (⌘↩)")
+
+                if let onClose {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Hide Problems (⇧⌘M)")
+                    .accessibilityLabel("Hide Problems")
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
 
             Divider()
 
@@ -98,21 +123,89 @@ struct ProblemsInspector: View {
     // MARK: Log
 
     private var logView: some View {
-        let log = viewModel.compileResult?.log ?? ""
-        return Group {
-            if log.isEmpty {
-                ContentUnavailableView("No Log Yet", systemImage: "text.alignleft", description: Text("The build log appears after you compile."))
-            } else {
-                ScrollView {
-                    Text(log)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(10)
+        let lines = filteredLog
+        return VStack(spacing: 0) {
+            if viewModel.compileResult != nil {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Filter Log", text: $logFilter)
+                        .textFieldStyle(.plain)
+                    if !logFilter.isEmpty {
+                        Button {
+                            logFilter = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Clear Filter")
+                    }
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                .padding(8)
+                Divider()
+            }
+
+            if lines.isEmpty {
+                ContentUnavailableView(
+                    viewModel.compileResult == nil ? "No Log Yet" : "No Matching Lines",
+                    systemImage: viewModel.compileResult == nil ? "text.alignleft" : "line.3.horizontal.decrease.circle",
+                    description: Text(viewModel.compileResult == nil ? "The build log appears after you compile." : "Try a different filter.")
+                )
+            } else {
+                List(lines) { line in
+                    logRow(line)
+                }
+                .listStyle(.plain)
                 .background(Color(nsColor: .textBackgroundColor))
             }
         }
+    }
+
+    private func logRow(_ line: BuildLogLine) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if line.isNavigable {
+                Image(systemName: "arrow.up.forward.square")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            Text(line.text.isEmpty ? " " : line.text)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(color(for: line.severity))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if line.isNavigable { viewModel.jumpToLogLine(line) }
+        }
+        .help(line.isNavigable ? "Jump to \(((line.file ?? "") as NSString).lastPathComponent):\(line.line ?? 0)" : "Build log line")
+        .contextMenu {
+            Button("Copy Line") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(line.text, forType: .string)
+            }
+            if line.isNavigable {
+                Button("Jump to Source") { viewModel.jumpToLogLine(line) }
+            }
+        }
+    }
+
+    private func color(for severity: BuildLogLine.Severity) -> Color {
+        switch severity {
+        case .error: return .red
+        case .warning: return .orange
+        case .info: return .primary
+        }
+    }
+
+    private var filteredLog: [BuildLogLine] {
+        guard !logFilter.isEmpty else { return viewModel.buildLogLines }
+        return viewModel.buildLogLines.filter { $0.text.localizedCaseInsensitiveContains(logFilter) }
     }
 
     // MARK: Footer

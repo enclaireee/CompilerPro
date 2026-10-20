@@ -13,6 +13,8 @@ public enum AppSettings {
     public static let darkPDF = "cp.darkPDF"                // Bool, default false
     public static let pdfZoomMode = "cp.pdfZoomMode"        // "fitWidth" | "fitPage" | "actualSize"
     public static let restoreSession = "cp.restoreSession"  // Bool, default true
+    /// Per-project main document: [standardized folder: absolute .tex path].
+    public static let mainFiles = "cp.mainFiles"            // [String: String]
 
     // Update check: on by default, at most once a day.
     public static let autoCheckUpdates = "cp.autoCheckUpdates"          // Bool, default true

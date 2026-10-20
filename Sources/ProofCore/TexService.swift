@@ -27,7 +27,11 @@ public enum TexError: LocalizedError, Equatable {
 }
 
 public enum TexService {
-    public static let outDir = ".build"
+    /// Build output lives beside the sources in a hidden folder. It must not be
+    /// `.build`: that name belongs to SwiftPM (and to several other tools), so a
+    /// project opened inside a Swift package would have its toolchain files deleted
+    /// by Clean Build.
+    public static let outDir = ".proof"
 
     private static let cacheLock = NSLock()
     private static var cachedTexbin: String?
@@ -386,7 +390,7 @@ public enum TexService {
     }
 
     /// Parses `synctex edit` output. Relative `Input:` paths (e.g. `./ch 1.tex`) resolve against the
-    /// project folder (parent of the `.build` folder holding `pdf`). Returns nil on malformed output.
+    /// project folder (parent of the `.proof` folder holding `pdf`). Returns nil on malformed output.
     public static func parseSynctexEdit(_ text: String, pdf: String) -> SourceLocation? {
         guard let input = synctexField("Input:", in: text), !input.isEmpty,
               let line = synctexField("Line:", in: text).flatMap({ Int($0) }) else {
@@ -539,7 +543,7 @@ public final class TexProcessRunner: @unchecked Sendable {
             lock.unlock()
             run.done.leave()
         }
-        // Both runs share the .build folder; let the old one die first (it escalates to SIGKILL at 2 s).
+        // Both runs share the .proof folder; let the old one die first (it escalates to SIGKILL at 2 s).
         if let previous {
             _ = previous.done.wait(timeout: .now() + 3)
         }
@@ -766,7 +770,7 @@ public final class TexProcessRunner: @unchecked Sendable {
         return (pid, readFD)
     }
 
-    /// Deletes the root's `.build` folder. Refuses (throws) when it resolves anywhere other than
+    /// Deletes the root's `.proof` folder. Refuses (throws) when it resolves anywhere other than
     /// directly inside the root's folder, e.g. a symlink planted by a downloaded project.
     public static func cleanBuild(root: String) throws {
         let rootDir = (root as NSString).deletingLastPathComponent

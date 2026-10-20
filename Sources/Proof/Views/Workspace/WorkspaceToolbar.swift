@@ -43,6 +43,17 @@ struct WorkspaceToolbar: ToolbarContent {
             }
 
             ToolbarItem(placement: .primaryAction) {
+                Button {
+                    viewModel.togglePDFSearch()
+                } label: {
+                    Label("Find in PDF", systemImage: "magnifyingglass")
+                        .symbolVariant(viewModel.isPDFSearchVisible ? .fill : .none)
+                }
+                .help("Find in PDF (⌥⌘F)")
+                .disabled(viewModel.pdfDocument == nil)
+            }
+
+            ToolbarItem(placement: .primaryAction) {
                 ZoomControl(scale: viewModel.zoomScale, onCommand: { viewModel.zoom($0) })
             }
 
@@ -85,6 +96,16 @@ struct WorkspaceToolbar: ToolbarContent {
                     Label("Export", systemImage: "square.and.arrow.up")
                 }
                 .help("Export Diagram (⇧⌘E)")
+            }
+        } else if viewModel.mode == .markdown {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    viewModel.export()
+                } label: {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                }
+                .help("Export PDF… (⇧⌘E)")
+                .disabled(viewModel.currentFile == nil)
             }
         }
     }

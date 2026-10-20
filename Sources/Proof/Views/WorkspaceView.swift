@@ -27,12 +27,15 @@ public struct WorkspaceView: View {
         } detail: {
             VStack(spacing: 0) {
                 detailContent
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        if viewModel.isProblemsVisible, viewModel.mode == .latex {
+                            BuildPanel(viewModel: viewModel)
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
                 StatusBar(viewModel: viewModel)
             }
-            .inspector(isPresented: problemsBinding) {
-                ProblemsInspector(viewModel: viewModel)
-                    .inspectorColumnWidth(min: 260, ideal: 320, max: 520)
-            }
+            .animation(.easeInOut(duration: 0.18), value: viewModel.isProblemsVisible)
         }
         .navigationTitle(viewModel.folderName)
         .navigationSubtitle(viewModel.currentRelativePath)
@@ -64,6 +67,19 @@ public struct WorkspaceView: View {
         } message: {
             Text(namePromptMessage)
         }
+        .alert("Go to Line", isPresented: $viewModel.isGoToLineVisible) {
+            TextField("Line number", text: $viewModel.goToLineText)
+            Button("Go") { viewModel.commitGoToLine() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enter a line number between 1 and the end of the file.")
+        }
+        .alert("File Changed on Disk", isPresented: externalChangeBinding) {
+            Button("Reload from Disk", role: .destructive) { viewModel.reloadExternalChange() }
+            Button("Keep My Changes", role: .cancel) { viewModel.keepExternalChange() }
+        } message: {
+            Text("“\(externalChangeName)” was changed by another program. Reloading replaces your unsaved edits.")
+        }
         .confirmationDialog(
             "Move “\(viewModel.trashTarget.map { ($0 as NSString).lastPathComponent } ?? "")” to the Trash?",
             isPresented: trashBinding,
@@ -89,11 +105,16 @@ public struct WorkspaceView: View {
 
     // MARK: - Bindings
 
-    private var problemsBinding: Binding<Bool> {
+    private var externalChangeBinding: Binding<Bool> {
         Binding(
-            get: { viewModel.mode == .latex && viewModel.isProblemsVisible },
-            set: { viewModel.isProblemsVisible = $0 }
+            get: { viewModel.externalChange != nil },
+            set: { if !$0 { viewModel.keepExternalChange() } }
         )
+    }
+
+    private var externalChangeName: String {
+        guard let path = viewModel.externalChange?.path else { return "The file" }
+        return (path as NSString).lastPathComponent
     }
 
     private var namePromptBinding: Binding<Bool> {
@@ -111,16 +132,26 @@ public struct WorkspaceView: View {
     }
 
     private var namePromptTitle: String {
-        if case .rename = viewModel.namePrompt?.kind { return "Rename File" }
-        return "New File"
+        guard let kind = viewModel.namePrompt?.kind else { return "New File" }
+        switch kind {
+        case .rename: return "Rename File"
+        case .newFolder: return "New Folder"
+        case .newFile: return "New File"
+        }
     }
 
     private var namePromptButton: String {
-        if case .rename = viewModel.namePrompt?.kind { return "Rename" }
-        return "Create"
+        guard let kind = viewModel.namePrompt?.kind else { return "Create" }
+        switch kind {
+        case .rename: return "Rename"
+        case .newFolder, .newFile: return "Create"
+        }
     }
 
     private var namePromptMessage: String {
+        if case .newFolder = viewModel.namePrompt?.kind {
+            return "Enter a name for the new folder."
+        }
         let ext = viewModel.mode.extensions.first ?? ""
         return "Enter a name. “.\(ext)” is added if you leave the extension out."
     }
@@ -140,16 +171,12 @@ public struct WorkspaceView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .textBackgroundColor))
         } else {
-            HSplitView {
-                if viewModel.layout != .preview {
-                    editorPane
-                        .frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
-                }
-                if viewModel.layout != .editor {
-                    previewPane
-                        .frame(minWidth: 260, maxWidth: .infinity, maxHeight: .infinity)
-                }
-            }
+            ProjectSplitView(
+                showsLeading: viewModel.layout != .preview,
+                showsTrailing: viewModel.layout != .editor,
+                leading: { editorPane },
+                trailing: { previewPane }
+            )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
@@ -163,9 +190,11 @@ public struct WorkspaceView: View {
             NativeCodeEditorView(
                 mode: viewModel.mode,
                 fileKey: viewModel.currentFile,
-                text: viewModel.editorText,
+                text: viewModel.liveEditorText,
                 revealRequest: viewModel.revealRequest,
                 formatRequest: viewModel.formatRequest,
+                editRequest: viewModel.editRequest,
+                diagnostics: viewModel.diagnostics,
                 onTextChange: { viewModel.onTextEdited($0) },
                 onCursorChange: { line, col in viewModel.onCursorChanged(line: line, col: col) },
                 onTopLineChange: { top in
@@ -204,19 +233,29 @@ public struct WorkspaceView: View {
             if viewModel.isSnippetMode {
                 LatexSnippetPreviewView(sourceText: viewModel.editorText)
             } else if viewModel.pdfDocument != nil {
-                NativePDFPreviewView(
-                    document: viewModel.pdfDocument,
-                    invertColors: darkPDF && colorScheme == .dark,
-                    syncTexSpots: viewModel.syncTexSpots,
-                    syncTexTrigger: viewModel.syncTexTrigger,
-                    zoomCommand: viewModel.pdfZoomCommand,
-                    initialZoomMode: viewModel.pdfZoomMode ?? PDFZoomMode(rawValue: pdfZoomModeRaw) ?? .fitWidth,
-                    initialScale: viewModel.pdfZoomMode == .custom ? viewModel.pdfScale : nil,
-                    onZoomChange: { scale, mode in viewModel.pdfZoomChanged(scale, mode) },
-                    onInverseSync: { page, x, y in
-                        viewModel.syncInverseFromPdf(page: page, x: x, y: y)
-                    }
-                )
+                ZStack(alignment: .topTrailing) {
+                    NativePDFPreviewView(
+                        document: viewModel.pdfDocument,
+                        invertColors: darkPDF && colorScheme == .dark,
+                        syncTexSpots: viewModel.syncTexSpots,
+                        syncTexTrigger: viewModel.syncTexTrigger,
+                        zoomCommand: viewModel.pdfZoomCommand,
+                        actionRequest: viewModel.pdfActionRequest,
+                        initialZoomMode: viewModel.pdfZoomMode ?? PDFZoomMode(rawValue: pdfZoomModeRaw) ?? .fitWidth,
+                        initialScale: viewModel.pdfZoomMode == .custom ? viewModel.pdfScale : nil,
+                        onZoomChange: { scale, mode in viewModel.pdfZoomChanged(scale, mode) },
+                        onInverseSync: { page, x, y in
+                            viewModel.syncInverseFromPdf(page: page, x: x, y: y)
+                        },
+                        onPageChange: { page, count in
+                            viewModel.pdfPageChanged(page, count: count)
+                        },
+                        onFindProgress: { current, total in
+                            viewModel.pdfFindProgressChanged(current: current, total: total)
+                        }
+                    )
+                    PDFPreviewControls(viewModel: viewModel)
+                }
             } else {
                 ContentUnavailableView {
                     Label("No Preview Yet", systemImage: "doc.richtext")
@@ -239,6 +278,13 @@ public struct WorkspaceView: View {
                 baseDirectory: viewModel.currentFile.map { ($0 as NSString).deletingLastPathComponent } ?? viewModel.folder,
                 topLine: viewModel.topVisibleLine,
                 workspaceRoot: viewModel.folder,
+                exportRequest: viewModel.markdownExportRequest,
+                onExportCompleted: { message, isError in
+                    viewModel.showToast(message, isError: isError)
+                },
+                onToggleTask: { line, checked in
+                    viewModel.toggleTask(atLine: line, checked: checked)
+                },
                 onOpenRelativeMarkdown: { targetPath in
                     viewModel.openFile(targetPath)
                 }
