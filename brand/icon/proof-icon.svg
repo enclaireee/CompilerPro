@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F0F0F5"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="0.25" y2="1">
+      <stop offset="0" stop-color="#3FA4FF"/>
+      <stop offset="1" stop-color="#0062E0"/>
+    </linearGradient>
+    <filter id="tileShadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#1C1C1E" flood-opacity="0.20"/>
+    </filter>
+    <filter id="pageShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#1C1C1E" flood-opacity="0.18"/>
+    </filter>
+    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#004FC4" flood-opacity="0.40"/>
+    </filter>
+    <clipPath id="tileClip"><rect x="100" y="100" width="824" height="824" rx="186"/></clipPath>
+    <clipPath id="pageClip"><rect x="-210" y="-270" width="420" height="540" rx="24"/></clipPath>
+  </defs>
+
+  <g filter="url(#tileShadow)"><rect x="100" y="100" width="824" height="824" rx="186" fill="url(#tile)"/></g>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="none" stroke="#000000" stroke-opacity="0.06" stroke-width="2"/>
+
+  <g clip-path="url(#tileClip)">
+    <g transform="translate(486,486) rotate(-6)" filter="url(#pageShadow)">
+      <rect x="-210" y="-270" width="420" height="540" rx="24" fill="#FFFFFF"/>
+      <g clip-path="url(#pageClip)">
+        <path d="M 210 -270 L 210 -192 A 18 18 0 0 1 192 -174 L 114 -174 Z" fill="#ECECF2"/>
+        <g fill="#C4C4CB">
+          <rect x="-152" y="-190" width="212" height="18" rx="9"/>
+          <rect x="-152" y="-142" width="292" height="18" rx="9"/>
+          <rect x="-152" y="-94" width="258" height="18" rx="9"/>
+          <rect x="-152" y="-46" width="292" height="18" rx="9"/>
+        </g>
+      </g>
+      <rect x="-210" y="-270" width="420" height="540" rx="24" fill="none" stroke="#000000" stroke-opacity="0.07" stroke-width="2"/>
+    </g>
+
+    <g transform="translate(676,668)" filter="url(#btnShadow)">
+      <circle r="116" fill="url(#blue)"/>
+      <path d="M -30 -44 L 50 0 L -30 44 Z" fill="#FFFFFF"/>
+    </g>
+  </g>
+</svg>
