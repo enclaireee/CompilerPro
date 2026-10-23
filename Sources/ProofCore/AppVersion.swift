@@ -7,7 +7,7 @@ import Foundation
 /// alongside the release tag so a development build still notices a newer release.
 public enum AppVersion {
     /// Keep in step with the tag of the release this source is cut from.
-    public static let fallback = "0.3.0"
+    public static let fallback = "0.3.1"
 
     public static var current: String {
         if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
