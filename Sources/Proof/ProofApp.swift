@@ -273,7 +273,9 @@ public final class ProofAppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        if let iconURL = Bundle.module.resourceURL?.appendingPathComponent("Resources/AppIcon.icns"),
+        // The .app's CFBundleIconFile already sets the Dock icon; only `swift run` needs it loaded by hand.
+        if Bundle.main.object(forInfoDictionaryKey: "CFBundleIconFile") == nil,
+           let iconURL = Bundle.module.resourceURL?.appendingPathComponent("Resources/AppIcon.icns"),
            let iconImage = NSImage(contentsOf: iconURL) {
             NSApp.applicationIconImage = iconImage
         }
