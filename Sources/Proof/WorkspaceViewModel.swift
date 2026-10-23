@@ -267,6 +267,21 @@ public final class WorkspaceViewModel: ObservableObject {
         }
     }
 
+    /// After the window closed: SwiftUI's menu commands can keep the last focused view model alive
+    /// (via @FocusedObject), so drop what is heavy. Text and the current file stay untouched.
+    public func releaseMemory() {
+        treeGeneration += 1
+        treeTask?.cancel()
+        pdfDocument = nil
+        compileResult = nil
+        buildLogLines = []
+        syncTexSpots = []
+        treeEntries = []
+        flatFiles = []
+        outlineHeadings = []
+        cursorCache = [:]
+    }
+
     /// Errors raise an alert in this window; everything else goes to the status bar and VoiceOver.
     public func showToast(_ text: String, isError: Bool = false) {
         if isError {

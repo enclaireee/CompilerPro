@@ -51,6 +51,8 @@ public struct WorkspaceView: View {
                     guard let viewModel else { return }
                     viewModel.teardown()
                     appState.unregister(viewModel)
+                    // Next turn: the window is already off screen, so nothing visibly empties.
+                    DispatchQueue.main.async { viewModel.releaseMemory() }
                 }
             )
         )
